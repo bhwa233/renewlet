@@ -33,6 +33,7 @@ import {
   preloadAIRecognizeSubscriptionDialog,
 } from '@/components/ai-recognize-subscription-dialog-loader';
 import { SubscriptionsPageSkeleton } from '@/components/loading-skeleton';
+import { useRouteReady } from '@/components/route-progress';
 import { SubscriptionCategoryFilter } from '@/components/subscription-category-filter';
 import { SubscriptionFilterFeedback } from '@/components/subscription-filter-feedback';
 import { QueryErrorState } from '@/components/query-error-state';
@@ -186,6 +187,7 @@ const Subscriptions = () => {
     [displaySourceSubscriptions, localFilteredSubscriptions, needsCollectionIndex, sortSubscriptionsForDisplay],
   );
   const isDisplayPending = needsCollectionIndex && indexQuery.isPending;
+  useRouteReady(subscriptionsQuery.isPending || isDisplayPending);
   const displayError = needsCollectionIndex ? indexQuery.error : subscriptionsQuery.error;
   const retryDisplayQuery = needsCollectionIndex ? indexQuery.refetch : subscriptionsQuery.refetch;
   const displayedTotal = needsCollectionIndex ? (indexQuery.data?.total ?? 0) : subscriptionsQuery.total;

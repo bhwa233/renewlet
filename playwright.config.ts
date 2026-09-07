@@ -104,6 +104,7 @@ export default defineConfig({
         "**/settings.spec.ts",
         "**/statistics.spec.ts",
         "**/release-smoke.spec.ts",
+        "**/route-progress.spec.ts",
       ],
       use: {
         ...devices["Desktop Chrome"],
@@ -113,7 +114,7 @@ export default defineConfig({
     {
       name: "mobile",
       dependencies: ["setup"],
-      testMatch: "**/mobile-*.spec.ts",
+      testMatch: ["**/mobile-*.spec.ts", "**/route-progress.spec.ts"],
       use: {
         ...devices["Pixel 5"],
         storageState: adminStorageState,
