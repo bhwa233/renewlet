@@ -76,6 +76,7 @@
     "test:perf": "pnpm --filter @renewlet/shared test:perf && pnpm --filter @renewlet/cloudflare test:perf && pnpm --filter @renewlet/client test:perf && pnpm --filter @renewlet/server test:perf",
     "test:run": "pnpm --filter @renewlet/client test:run && pnpm --filter @renewlet/server test",
     "test:e2e": "pnpm typecheck:e2e && playwright test",
+    "test:e2e:perf": "RENEWLET_E2E_PERFORMANCE=1 pnpm test:e2e",
     "test:e2e:cloudflare": "node scripts/run-cloudflare-check.mjs",
     "test:e2e:cloudflare:headed": "node scripts/run-cloudflare-check.mjs --headed",
     "test:e2e:cloudflare:ui": "node scripts/run-cloudflare-check.mjs --ui",
