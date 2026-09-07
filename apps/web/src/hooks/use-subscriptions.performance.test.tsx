@@ -11,7 +11,7 @@ const queryClients: QueryClient[] = [];
 const queryKey = subscriptionsInfiniteQueryOptions().queryKey;
 
 // Profiler 只观察真实 Hook 消费者；jsdom 的诊断耗时不与生产浏览器导航耗时混算。
-function mountSubscriptions(total: number) {
+function mountSubscriptions(total: number, reactStrictMode = false) {
   const page: SubscriptionPage = {
     subscriptions: subscriptionPerformanceCollectionItems(total).slice(0, subscriptionService.pageSize),
     nextCursor: total > subscriptionService.pageSize ? "next-page" : null,
@@ -32,7 +32,7 @@ function mountSubscriptions(total: number) {
       </QueryClientProvider>
     );
   }
-  return { ...renderHook(() => useInfiniteSubscriptions(), { wrapper: Wrapper }), queryClient, page, commits };
+  return { ...renderHook(() => useInfiniteSubscriptions(), { wrapper: Wrapper, reactStrictMode }), queryClient, page, commits };
 }
 
 beforeEach(() => {
@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe.each(subscriptionPerformanceFixture.scenarios)("Query subscription work: $size", ({ size }) => {
-  it("records ten unchanged background refreshes without replacing visible data", async () => {
+  it("commits no consumer updates over ten unchanged background refreshes", async () => {
     const request = vi.spyOn(subscriptionService, "listPage");
     const { result, queryClient, page, commits } = mountSubscriptions(size);
     const visibleSubscriptions = result.current.subscriptions;
@@ -68,6 +68,7 @@ describe.each(subscriptionPerformanceFixture.scenarios)("Query subscription work
       expect(queryClient.isFetching({ queryKey })).toBe(1);
       expect(result.current.isPending).toBe(false);
       expect(result.current.subscriptions).toBe(visibleSubscriptions);
+      expect(commits).toHaveLength(0);
       await act(async () => {
         // 模拟重新解析的相同响应，让 TanStack 自己做结构共享；直接返回缓存引用会掩盖这一边界。
         complete(structuredClone(page));
@@ -80,13 +81,65 @@ describe.each(subscriptionPerformanceFixture.scenarios)("Query subscription work
       expect(result.current.hasNextPage).toBe(page.nextCursor !== null);
       expect(result.current.isFetchingNextPage).toBe(false);
       expect(result.current.error).toBeNull();
+      expect(commits).toHaveLength(0);
       samples.push({ commits: commits.length, actualDurationMs: commits.reduce((sum, duration) => sum + duration, 0) });
     }
 
     expect(request).toHaveBeenCalledTimes(10);
-    // 这里只记录优化前的原始工作量，不把多余 commit 固化成必须保留的行为；C1 后再收紧为零更新断言。
+    // 零更新只约束相同响应且分页状态不变的刷新；真实数据、错误和加载下一页仍必须通知页面。
     console.info(`[perf] query_subscription ${JSON.stringify({ size, loaded: page.subscriptions.length, samples })}`);
   });
+});
+
+it("keeps only the list contract and stable actions under StrictMode", async () => {
+  const request = vi.spyOn(subscriptionService, "listPage");
+  const { result, page, commits } = mountSubscriptions(10, true);
+  const initial = result.current;
+  expect(Object.keys(initial).sort()).toEqual([
+    "subscriptions", "total", "isPending", "error", "hasNextPage", "isFetchingNextPage", "fetchNextPage", "refetch",
+  ].sort());
+  request.mockResolvedValueOnce(structuredClone(page));
+  await act(async () => {
+    await initial.refetch();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(commits).toHaveLength(0);
+  expect(result.current.subscriptions).toBe(initial.subscriptions);
+  expect(result.current.fetchNextPage).toBe(initial.fetchNextPage);
+  expect(result.current.refetch).toBe(initial.refetch);
+});
+
+it("publishes next-page progress and appends the cursor result without replacing existing items", async () => {
+  const complete = vi.fn<(value: SubscriptionPage) => void>();
+  const request = vi.spyOn(subscriptionService, "listPage")
+    .mockReturnValueOnce(new Promise<SubscriptionPage>((resolve) => complete.mockImplementation(resolve)));
+  const { result, page } = mountSubscriptions(100);
+  const visibleSubscriptions = result.current.subscriptions;
+  const nextPage: SubscriptionPage = {
+    subscriptions: subscriptionPerformanceCollectionItems(100).slice(subscriptionService.pageSize),
+    nextCursor: null,
+    total: 100,
+  };
+  const fetching = result.current.fetchNextPage();
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  // 加载下一页仍是列表需要的局部反馈，不能与本轮移除的无关后台刷新订阅一起屏蔽。
+  expect(result.current.isFetchingNextPage).toBe(true);
+  expect(result.current.isPending).toBe(false);
+  expect(result.current.subscriptions).toBe(visibleSubscriptions);
+  expect(request).toHaveBeenCalledWith(page.nextCursor, subscriptionService.pageSize, undefined, expect.anything());
+  await act(async () => {
+    complete(nextPage);
+    await fetching;
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(result.current.subscriptions).toEqual([...page.subscriptions, ...nextPage.subscriptions]);
+  expect(result.current.subscriptions[0]).toBe(visibleSubscriptions[0]);
+  expect(result.current.total).toBe(100);
+  expect(result.current.hasNextPage).toBe(false);
+  expect(result.current.isFetchingNextPage).toBe(false);
+  expect(result.current.error).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
 });
 
 it("still publishes changed data and background errors through the existing result", async () => {
