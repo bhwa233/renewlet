@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import { defineConfig, devices } from "@playwright/test";
+import { resolve } from "node:path";
 import { capturePerformanceEnvironment, performanceSampleCount } from "./scripts/browser-performance";
 
 // 这个根层配置经常被编辑器作为独立文件打开；文件级 Node types 避免 TS Server
@@ -56,7 +57,10 @@ export default defineConfig({
   retries: performanceMode ? 0 : env.CI ? 1 : 0,
   metadata: performanceEnvironment ? { performance: performanceEnvironment } : {},
   // CPU/commit 诊断不能生成可被比较器接受的生产耗时报告。
-  reporter: performanceMode && !profilingMode ? [["list"], ["./e2e/support/performance-reporter.ts"]] : [["list"], ["html", { open: "never" }]],
+  reporter: performanceMode && !profilingMode ? [["list"], ["./e2e/support/performance-reporter.ts"]] : [
+    ["list"], ["html", { open: "never" }],
+    ["./e2e/support/server-diagnostics-reporter.ts", { outputFile: resolve(__dirname, "test-results/server-diagnostics.json") }],
+  ],
   timeout: 90_000,
   expect: {
     timeout: 10_000,
@@ -84,6 +88,9 @@ export default defineConfig({
       url: `${e2eServerURL}/api/app/health`,
       reuseExistingServer: false,
       timeout: 120_000,
+      // Go 与 Vite 都可能在 stdout 输出诊断；两条流都交给 reporter，不能仅依赖页面 console 事件。
+      stdout: "pipe",
+      stderr: "pipe",
     },
     {
       // 性能模式重建生产产物；普通 E2E 仍重建 optimizer，不复用开发机残留缓存。
@@ -98,6 +105,8 @@ export default defineConfig({
       url: e2eClientURL,
       reuseExistingServer: false,
       timeout: performanceMode || previousDist ? 300_000 : 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
     },
   ],
   projects: [
@@ -130,6 +139,7 @@ export default defineConfig({
         "**/statistics.spec.ts",
         "**/release-smoke.spec.ts",
         "**/route-progress.spec.ts",
+        "**/report-exchange-rates.spec.ts",
       ],
       use: {
         ...devices["Desktop Chrome"],
@@ -140,7 +150,7 @@ export default defineConfig({
       name: performanceMode ? "performance-mobile" : "mobile",
       dependencies: [performanceMode ? "performance-seed" : "setup"],
       repeatEach: performanceMode && !profilingMode ? performanceSampleCount : 1,
-      testMatch: previousDist ? ["**/version-upgrade.spec.ts"] : performanceMode ? ["**/performance.spec.ts"] : ["**/mobile-*.spec.ts", "**/route-progress.spec.ts"],
+      testMatch: previousDist ? ["**/version-upgrade.spec.ts"] : performanceMode ? ["**/performance.spec.ts"] : ["**/mobile-*.spec.ts", "**/route-progress.spec.ts", "**/report-exchange-rates.spec.ts"],
       use: {
         ...devices["Pixel 5"],
         storageState: adminStorageState,

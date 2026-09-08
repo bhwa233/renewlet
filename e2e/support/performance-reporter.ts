@@ -2,14 +2,16 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { FullConfig, FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 import {
-  buildArtifactHash, performanceEnvironmentSchema, performanceSampleSchema, performanceServerFailures, summarizeReport, worktreeHash,
+  buildArtifactHash, performanceEnvironmentSchema, performanceSampleSchema, summarizeReport, worktreeHash,
   type PerformanceReport,
 } from "../../scripts/browser-performance";
+import { serverDiagnosticFailures } from "../../scripts/server-diagnostics";
 
 export default class PerformanceReporter implements Reporter {
   private report: PerformanceReport | undefined;
   private root = "";
   private stderrChunks: string[] = [];
+  private stdoutChunks: string[] = [];
   private diagnostics: { test: string; iteration: number; attachment: string; body: unknown }[] = [];
 
   onBegin(config: FullConfig) {
@@ -30,6 +32,10 @@ export default class PerformanceReporter implements Reporter {
   onStdErr(chunk: string | Buffer) {
     // 保留跨 chunk 的完整行，避免 ERROR 标记恰好被管道分段时漏判；onBegin 前的构建告警同样保留。
     this.stderrChunks.push(chunk.toString());
+  }
+
+  onStdOut(chunk: string | Buffer) {
+    this.stdoutChunks.push(chunk.toString());
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
@@ -56,7 +62,10 @@ export default class PerformanceReporter implements Reporter {
   async onEnd(result: FullResult): Promise<{ status: "failed" | "passed" }> {
     if (!this.report) throw new Error("Missing performance report");
     this.report.status = result.status;
-    this.report.failures.push(...performanceServerFailures(this.stderrChunks.join("")));
+    this.report.failures.push(
+      ...serverDiagnosticFailures(this.stdoutChunks.join("")),
+      ...serverDiagnosticFailures(this.stderrChunks.join("")),
+    );
     let summaries: ReturnType<typeof summarizeReport> | undefined;
     try {
       if (worktreeHash(this.root) !== this.report.environment.worktreeHash) this.report.failures.push("Sources changed during measurement");

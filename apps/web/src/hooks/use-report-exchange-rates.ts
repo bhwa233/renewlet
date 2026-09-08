@@ -127,10 +127,14 @@ export function createUseReportExchangeRates(store: ExchangeRateStore) {
           if (controller.signal.aborted) return;
           capturedSignatureRef.current = "";
           setCaptureError(error);
-          console.warn("Failed to capture report exchange-rate snapshot:", error);
         });
       return dispose;
     }, [currentSnapshot, live.activeProvider, live.isRefreshing, live.loading, live.rates, live.sourceDate, live.warning, month, preferredProvider, snapshotLoaded]);
+
+    useEffect(() => {
+      // 请求拒绝可先于 pagehide 的取消监听执行；诊断跟随错误状态 commit，销毁文档不再产生迟到副作用。
+      if (captureError !== null) console.warn("Failed to capture report exchange-rate snapshot:", captureError);
+    }, [captureError]);
 
     const reportBasisStatus = useMemo<ReportExchangeRateBasisStatus>(() => ({
       month,

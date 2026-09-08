@@ -3,9 +3,10 @@ import test from "node:test";
 import { IMPORT_APPLY_SUBSCRIPTION_LIMIT, importApplyRequestSchema } from "../packages/shared/src/schemas/import-export";
 import {
   comparePerformanceReports, performanceFixture, performanceInteractions, performancePages,
-  performanceReportSchema, performanceSampleCount, performanceServerFailures, sha256, summarize, summarizeReport,
+  performanceReportSchema, performanceSampleCount, sha256, summarize, summarizeReport,
   type PerformanceReport, type PerformanceSample,
 } from "./browser-performance";
+import { serverDiagnosticFailures } from "./server-diagnostics";
 
 function report(): PerformanceReport {
   const samples: PerformanceSample[] = [];
@@ -56,9 +57,9 @@ test("native content-ready measurements reject retired clock and polling formats
 
 test("server diagnostics invalidate samples even when all browser assertions passed", () => {
   const chunks = ["[WebServer] \u001b[31mER", "ROR scheduler failed\u001b[0m\n", "[WebServer] [console.warn] capture failed\n"];
-  const failures = performanceServerFailures(chunks.join(""));
+  const failures = serverDiagnosticFailures(chunks.join(""));
   assert.deepEqual(failures, ["[WebServer] ERROR scheduler failed", "[WebServer] [console.warn] capture failed"]);
-  assert.deepEqual(performanceServerFailures("[WebServer] INFO ready\n$ eslint --max-warnings 0\n"), []);
+  assert.deepEqual(serverDiagnosticFailures("[WebServer] INFO ready\n$ eslint --max-warnings 0\n"), []);
   const candidate = report();
   candidate.failures.push(...failures);
   assert.throws(() => summarizeReport(candidate), /Failed runs/);

@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { arch, cpus, hostname, platform, release } from "node:os";
 import { join } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import { z } from "zod";
 import { buildSubscriptionPerformanceScenario } from "../packages/shared/src/contract-fixtures";
 import { performanceExchangeRateCache } from "../e2e/support/exchange-rate-fixture";
@@ -156,12 +155,6 @@ export function summarizeReport(report: PerformanceReport) {
   }
   if (report.samples.length !== Object.keys(summaries).length * performanceSampleCount) throw new Error("Unexpected performance samples");
   return summaries;
-}
-
-/** 浏览器断言通过不代表服务端健康；调度失败和退出文档后的告警也必须使该轮基线失效。 */
-export function performanceServerFailures(stderr: string): string[] {
-  return stripVTControlCharacters(stderr).split(/\r?\n/)
-    .filter((line) => /\b(?:ERROR|WARN|Warning)\b|\[console\.(?:warn|error)\]/.test(line));
 }
 
 export function comparePerformanceReports(baseline: PerformanceReport, candidate: PerformanceReport) {
