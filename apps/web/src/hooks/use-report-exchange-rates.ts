@@ -53,6 +53,18 @@ function snapshotCapturedDate(snapshot: ExchangeRateSnapshotV1 | null): Date | n
   return Number.isNaN(capturedAt.getTime()) ? null : capturedAt;
 }
 
+/** 整页销毁不触发 React 卸载；只取消本视图请求，BFCache 暂存后恢复仍沿用原 Hook 和请求。 */
+function abortOnDocumentDiscard(controller: AbortController): () => void {
+  const onPageHide = (event: PageTransitionEvent) => {
+    if (!event.persisted) controller.abort();
+  };
+  window.addEventListener("pagehide", onPageHide);
+  return () => {
+    window.removeEventListener("pagehide", onPageHide);
+    controller.abort();
+  };
+}
+
 export function createUseReportExchangeRates(store: ExchangeRateStore) {
   const useExchangeRates = createUseExchangeRates(store);
 
@@ -71,6 +83,7 @@ export function createUseReportExchangeRates(store: ExchangeRateStore) {
 
     useEffect(() => {
       const controller = new AbortController();
+      const dispose = abortOnDocumentDiscard(controller);
       capturedSignatureRef.current = "";
       // 先读当前月快照再决定 capture；loaded 和 snapshot 必须原子更新，避免短暂 null 被误判成未锁定。
       setSnapshotState({ month, snapshot: null, loaded: false });
@@ -85,7 +98,7 @@ export function createUseReportExchangeRates(store: ExchangeRateStore) {
             setSnapshotState({ month, snapshot: null, loaded: true });
           }
         });
-      return () => controller.abort();
+      return dispose;
     }, [month]);
 
     useEffect(() => {
@@ -101,6 +114,7 @@ export function createUseReportExchangeRates(store: ExchangeRateStore) {
       const signature = exchangeRateSnapshotSignature(snapshotBody);
       if (capturedSignatureRef.current === signature || exchangeRateSnapshotSignature(currentSnapshot) === signature) return;
       const controller = new AbortController();
+      const dispose = abortOnDocumentDiscard(controller);
       capturedSignatureRef.current = signature;
       // 当前月快照是报表口径缓存，不是实时汇率请求的成功条件；capture 失败只降级为未锁定状态。
       void exchangeRateSnapshotService.capture(month, snapshotBody, controller.signal)
@@ -115,7 +129,7 @@ export function createUseReportExchangeRates(store: ExchangeRateStore) {
           setCaptureError(error);
           console.warn("Failed to capture report exchange-rate snapshot:", error);
         });
-      return () => controller.abort();
+      return dispose;
     }, [currentSnapshot, live.activeProvider, live.isRefreshing, live.loading, live.rates, live.sourceDate, live.warning, month, preferredProvider, snapshotLoaded]);
 
     const reportBasisStatus = useMemo<ReportExchangeRateBasisStatus>(() => ({

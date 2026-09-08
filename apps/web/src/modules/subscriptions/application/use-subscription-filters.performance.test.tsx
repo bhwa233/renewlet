@@ -9,7 +9,7 @@ import { useSubscriptionFilters } from "./use-subscription-filters";
 const filterOptions = { today: "2026-09-07", defaultCurrency: "CNY" };
 
 describe.each(subscriptionPerformanceFixture.scenarios)("subscription sorting work: $size", ({ size }) => {
-  it("separates automatic page work from explicit index sorting over ten samples", () => {
+  it("sorts only the selected index and performs no eager page work over ten samples", () => {
     const subscriptions = subscriptionPerformanceCollectionItems(size);
     const page = subscriptions.slice(0, subscriptionService.pageSize);
     // spy 透传真实领域函数，只记录入参规模；不重写排序，也不把 Hook 契约测试冒充整页主线程归因。
@@ -17,8 +17,7 @@ describe.each(subscriptionPerformanceFixture.scenarios)("subscription sorting wo
     const samples: { eagerRows: number[]; displayRows: number[]; elapsedMs: number }[] = [];
 
     for (let sample = 0; sample < 10; sample += 1) {
-      const { result, unmount } = renderHook(() => useSubscriptionFilters(page, filterOptions));
-      expect(result.current.filteredSubscriptions).toHaveLength(page.length);
+      const { result, unmount } = renderHook(() => useSubscriptionFilters(filterOptions));
       expect(result.current.needsCollectionIndex).toBe(false);
       act(() => result.current.setSortOption("name_asc"));
       expect(result.current.needsCollectionIndex).toBe(true);
@@ -27,6 +26,7 @@ describe.each(subscriptionPerformanceFixture.scenarios)("subscription sorting wo
       const startedAt = performance.now();
       act(() => result.current.setSortOption("monthly_cost_asc"));
       const eagerRows = sort.mock.calls.map(([items]) => items.length);
+      expect(eagerRows).toEqual([]);
       sort.mockClear();
       const displayed = result.current.sortSubscriptionsForDisplay(subscriptions);
       const elapsedMs = performance.now() - startedAt;
@@ -38,7 +38,7 @@ describe.each(subscriptionPerformanceFixture.scenarios)("subscription sorting wo
       unmount();
     }
 
-    // 当前分页结果虽不用于索引展示仍会排序；记录两类工作量，C2 删除自动排序后不保留旧接口来对照。
+    // 与归档的优化前样本对照工作量，不保留旧运行时接口来制造第二套实现。
     console.info(`[perf] subscription_sort ${JSON.stringify({ size, loaded: page.length, samples })}`);
   });
 
@@ -47,7 +47,7 @@ describe.each(subscriptionPerformanceFixture.scenarios)("subscription sorting wo
     const target = subscriptions.at(-1);
     if (!target) throw new Error("shared performance fixture must not be empty");
     const page = subscriptions.slice(0, subscriptionService.pageSize);
-    const { result } = renderHook(() => useSubscriptionFilters(page, filterOptions));
+    const { result } = renderHook(() => useSubscriptionFilters(filterOptions));
     act(() => result.current.setSearchQuery(target.name));
 
     // 导出接收完整详情，而不是分页或轻量索引；本断言只覆盖稳定后的搜索，不能冒充 deferred 中间态验证。

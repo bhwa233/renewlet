@@ -6,6 +6,10 @@ import { capturePerformanceEnvironment, performanceSampleCount } from "./scripts
 // 还没关联 tsconfig.playwright.json 时误报 process/node 内置类型缺失。
 const env = process.env;
 const performanceMode = env.RENEWLET_E2E_PERFORMANCE === "1";
+const profilingMode = env.RENEWLET_E2E_PROFILE === "1";
+const previousDist = env.RENEWLET_E2E_PREVIOUS_DIST;
+if (previousDist && performanceMode) throw new Error("Deployment upgrade journeys must run separately from performance samples");
+if (profilingMode && !performanceMode) throw new Error("RENEWLET_E2E_PROFILE requires the isolated performance fixture");
 // 根包由 Playwright 按 CommonJS 加载；指纹根目录跟随配置文件，不依赖调用者 cwd。
 const performanceEnvironment = performanceMode ? capturePerformanceEnvironment(__dirname) : undefined;
 
@@ -51,7 +55,8 @@ export default defineConfig({
   // 性能样本不能自动重试到变绿；原始失败与不足十次的分组必须保留。
   retries: performanceMode ? 0 : env.CI ? 1 : 0,
   metadata: performanceEnvironment ? { performance: performanceEnvironment } : {},
-  reporter: performanceMode ? [["list"], ["./e2e/support/performance-reporter.ts"]] : [["list"], ["html", { open: "never" }]],
+  // CPU/commit 诊断不能生成可被比较器接受的生产耗时报告。
+  reporter: performanceMode && !profilingMode ? [["list"], ["./e2e/support/performance-reporter.ts"]] : [["list"], ["html", { open: "never" }]],
   timeout: 90_000,
   expect: {
     timeout: 10_000,
@@ -82,17 +87,17 @@ export default defineConfig({
     },
     {
       // 性能模式重建生产产物；普通 E2E 仍重建 optimizer，不复用开发机残留缓存。
-      command: performanceMode
-        ? `pnpm --filter @renewlet/client build && pnpm --dir apps/web exec vite preview --host 127.0.0.1 --port ${e2eClientPort} --strictPort`
+      command: performanceMode || previousDist
+        ? `${profilingMode ? "pnpm --filter @renewlet/client exec vite build --sourcemap" : "pnpm --filter @renewlet/client build"} && pnpm --dir apps/web exec vite preview --host 127.0.0.1 --port ${e2eClientPort} --strictPort`
         : `pnpm --dir apps/web exec vite --force --host 127.0.0.1 --port ${e2eClientPort} --strictPort`,
       env: {
         ...proxyEnv,
         VITE_DEV_PROXY_TARGET: e2eServerURL,
-        ...(performanceMode ? { VITE_RENEWLET_RUNTIME: "docker" } : {}),
+        ...(performanceMode || previousDist ? { VITE_RENEWLET_RUNTIME: "docker" } : {}),
       },
       url: e2eClientURL,
       reuseExistingServer: false,
-      timeout: performanceMode ? 300_000 : 120_000,
+      timeout: performanceMode || previousDist ? 300_000 : 120_000,
     },
   ],
   projects: [
@@ -117,8 +122,8 @@ export default defineConfig({
     {
       name: performanceMode ? "performance-desktop" : "desktop",
       dependencies: [performanceMode ? "performance-seed" : "setup"],
-      repeatEach: performanceMode ? performanceSampleCount : 1,
-      testMatch: performanceMode ? ["**/performance.spec.ts"] : [
+      repeatEach: performanceMode && !profilingMode ? performanceSampleCount : 1,
+      testMatch: previousDist ? ["**/version-upgrade.spec.ts"] : performanceMode ? ["**/performance.spec.ts"] : [
         "**/calendar-feed-management.spec.ts",
         "**/subscriptions.spec.ts",
         "**/settings.spec.ts",
@@ -134,8 +139,8 @@ export default defineConfig({
     {
       name: performanceMode ? "performance-mobile" : "mobile",
       dependencies: [performanceMode ? "performance-seed" : "setup"],
-      repeatEach: performanceMode ? performanceSampleCount : 1,
-      testMatch: performanceMode ? ["**/performance.spec.ts"] : ["**/mobile-*.spec.ts", "**/route-progress.spec.ts"],
+      repeatEach: performanceMode && !profilingMode ? performanceSampleCount : 1,
+      testMatch: previousDist ? ["**/version-upgrade.spec.ts"] : performanceMode ? ["**/performance.spec.ts"] : ["**/mobile-*.spec.ts", "**/route-progress.spec.ts"],
       use: {
         ...devices["Pixel 5"],
         storageState: adminStorageState,

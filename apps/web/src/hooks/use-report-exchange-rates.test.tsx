@@ -202,4 +202,51 @@ describe("useReportExchangeRates", () => {
     expect(result.current.activeProvider).toBe("builtin");
     expect(serviceMocks.capture).not.toHaveBeenCalled();
   });
+
+  it("keeps a suspended document request but cancels it when the document is permanently discarded", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let rejectCapture: (error: Error) => void = () => { throw new Error("Capture has not started"); };
+    serviceMocks.capture.mockImplementation(() => new Promise((_resolve, reject) => { rejectCapture = reject; }));
+    const useReportExchangeRates = createUseReportExchangeRates(remoteStore());
+    renderHook(() => useReportExchangeRates());
+    await waitFor(() => expect(serviceMocks.capture).toHaveBeenCalledTimes(1));
+    const signal = serviceMocks.capture.mock.calls[0]?.[2];
+    expect(signal?.aborted).toBe(false);
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+    expect(signal?.aborted).toBe(false);
+    // BFCache 恢复不重新挂载 Hook；第一次暂存不能移除永久离开时仍要使用的清理监听。
+    act(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false })));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => rejectCapture(new Error("Discarded document request")));
+    expect(warning).not.toHaveBeenCalled();
+  });
+
+  it("still exposes a real capture failure while the document is active", async () => {
+    const failure = new Error("Capture service unavailable");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    serviceMocks.capture.mockRejectedValue(failure);
+    const useReportExchangeRates = createUseReportExchangeRates(remoteStore());
+    const { result } = renderHook(() => useReportExchangeRates());
+    await waitFor(() => expect(result.current.reportBasisCaptureError).toBe(failure));
+    expect(warning).toHaveBeenCalledExactlyOnceWith("Failed to capture report exchange-rate snapshot:", failure);
+  });
+
+  it("disposes every document listener and pending read under StrictMode", async () => {
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    serviceMocks.list.mockImplementation(() => new Promise(() => {}));
+    const useReportExchangeRates = createUseReportExchangeRates(remoteStore());
+    const { unmount } = renderHook(() => useReportExchangeRates(), { reactStrictMode: true });
+    await waitFor(() => expect(serviceMocks.list).toHaveBeenCalledTimes(2));
+    const signal = serviceMocks.list.mock.calls.at(-1)?.[1];
+    expect(signal?.aborted).toBe(false);
+    act(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false })));
+    expect(signal?.aborted).toBe(true);
+    unmount();
+    for (const call of added.mock.calls.filter(([type]) => type === "pagehide")) {
+      expect(removed.mock.calls).toContainEqual(call);
+    }
+    expect(serviceMocks.capture).not.toHaveBeenCalled();
+  });
 });

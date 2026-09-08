@@ -3,8 +3,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { arch, cpus, hostname, platform, release } from "node:os";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { z } from "zod";
 import { buildSubscriptionPerformanceScenario } from "../packages/shared/src/contract-fixtures";
+import { performanceExchangeRateCache } from "../e2e/support/exchange-rate-fixture";
 
 export const performanceSampleCount = 10;
 export const performancePages = ["dashboard", "subscriptions", "statistics", "calendar", "settings"] as const;
@@ -30,7 +32,7 @@ const metricsSchema = z.object({
 export const performanceSampleSchema = z.object({
   project: z.string(),
   scenario: z.string(),
-  cache: z.enum(["cold-document", "warm-spa", "interaction"]),
+  cache: z.enum(["cold-document", "warm-spa", "warm-document", "interaction"]),
   iteration: z.number().int().nonnegative(),
   browser: z.string(),
   viewport: z.object({ width: z.number(), height: z.number() }),
@@ -46,13 +48,13 @@ export const performanceEnvironmentSchema = z.object({
   os: z.string(), cpu: z.string(), architecture: z.string(),
   fixtureDay: z.string(), fixtureHash: z.string(),
   runtime: z.literal("docker-production-preview"),
-  cachePolicy: z.literal("http-cache-disabled-by-e2e-routing;warm-spa-keeps-query-and-modules"),
+  cachePolicy: z.literal("http-cache-enabled;seeded-exchange-rates;warm-spa-keeps-query-and-modules"),
   locale: z.literal("zh-CN"), timezone: z.literal("Asia/Shanghai"),
 });
 export type PerformanceEnvironment = z.infer<typeof performanceEnvironmentSchema>;
 
 export const performanceReportSchema = z.object({
-  version: z.literal(1), environment: performanceEnvironmentSchema, artifactHash: z.string(),
+  version: z.literal(6), environment: performanceEnvironmentSchema, artifactHash: z.string(),
   status: z.string(), samples: z.array(performanceSampleSchema), failures: z.array(z.string()),
 });
 export type PerformanceReport = z.infer<typeof performanceReportSchema>;
@@ -88,18 +90,19 @@ export function worktreeHash(root: string): string {
 }
 
 export function capturePerformanceEnvironment(root: string): PerformanceEnvironment {
-  const fixtureDay = new Intl.DateTimeFormat("en-CA", {
+  // 跨午夜的交替采样必须复用同一天夹具；显式日期仍写入报告并参与输入指纹。
+  const fixtureDay = z.iso.date().parse(process.env["RENEWLET_PERFORMANCE_DAY"] ?? new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date());
+  }).format(new Date()));
   return {
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
     worktreeHash: worktreeHash(root), lockHash: sha256(readFileSync(join(root, "pnpm-lock.yaml"))),
     node: process.version, packageManager: process.env["npm_config_user_agent"] ?? "unknown",
     go: execFileSync("go", ["env", "GOVERSION"], { cwd: join(root, "apps/docker-server"), encoding: "utf8" }).trim(),
     host: hostname(), os: `${platform()} ${release()}`, cpu: cpus()[0]?.model ?? "unknown", architecture: arch(),
-    fixtureDay, fixtureHash: sha256(JSON.stringify(performanceFixture(fixtureDay))),
+    fixtureDay, fixtureHash: sha256(JSON.stringify([performanceFixture(fixtureDay), performanceExchangeRateCache(fixtureDay)])),
     runtime: "docker-production-preview",
-    cachePolicy: "http-cache-disabled-by-e2e-routing;warm-spa-keeps-query-and-modules",
+    cachePolicy: "http-cache-enabled;seeded-exchange-rates;warm-spa-keeps-query-and-modules",
     locale: "zh-CN", timezone: "Asia/Shanghai",
   };
 }
@@ -135,7 +138,7 @@ export function summarizeReport(report: PerformanceReport) {
   const summaries: Record<string, Record<string, ReturnType<typeof summarize>>> = {};
   for (const project of ["performance-desktop", "performance-mobile"]) {
     const scenarios = [
-      ...performancePages.flatMap((page) => [`${page}/cold-document`, `${page}/warm-spa`]),
+      ...performancePages.flatMap((page) => [`${page}/cold-document`, `${page}/warm-spa`, `${page}/warm-document`]),
       ...performanceInteractions.map((scenario) => `${scenario}/interaction`),
     ];
     for (const scenario of scenarios) {
@@ -153,6 +156,12 @@ export function summarizeReport(report: PerformanceReport) {
   }
   if (report.samples.length !== Object.keys(summaries).length * performanceSampleCount) throw new Error("Unexpected performance samples");
   return summaries;
+}
+
+/** 浏览器断言通过不代表服务端健康；调度失败和退出文档后的告警也必须使该轮基线失效。 */
+export function performanceServerFailures(stderr: string): string[] {
+  return stripVTControlCharacters(stderr).split(/\r?\n/)
+    .filter((line) => /\b(?:ERROR|WARN|Warning)\b|\[console\.(?:warn|error)\]/.test(line));
 }
 
 export function comparePerformanceReports(baseline: PerformanceReport, candidate: PerformanceReport) {

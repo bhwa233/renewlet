@@ -3,7 +3,7 @@ import test from "node:test";
 import { IMPORT_APPLY_SUBSCRIPTION_LIMIT, importApplyRequestSchema } from "../packages/shared/src/schemas/import-export";
 import {
   comparePerformanceReports, performanceFixture, performanceInteractions, performancePages,
-  performanceReportSchema, performanceSampleCount, sha256, summarize, summarizeReport,
+  performanceReportSchema, performanceSampleCount, performanceServerFailures, sha256, summarize, summarizeReport,
   type PerformanceReport, type PerformanceSample,
 } from "./browser-performance";
 
@@ -13,6 +13,7 @@ function report(): PerformanceReport {
     const scenarios = [
       ...performancePages.flatMap((scenario) => [
         { scenario, cache: "cold-document" as const }, { scenario, cache: "warm-spa" as const },
+        { scenario, cache: "warm-document" as const },
       ]),
       ...performanceInteractions.map((scenario) => ({ scenario, cache: "interaction" as const })),
     ];
@@ -29,11 +30,11 @@ function report(): PerformanceReport {
     }
   }
   return {
-    version: 1, artifactHash: "artifact", status: "passed", samples, failures: [],
+    version: 6, artifactHash: "artifact", status: "passed", samples, failures: [],
     environment: {
       revision: "revision", worktreeHash: "tree", lockHash: "lock", node: "node", packageManager: "pnpm", go: "go",
       host: "host", os: "os", cpu: "cpu", architecture: "arch", fixtureDay: "2026-09-07", fixtureHash: "fixture",
-      runtime: "docker-production-preview", cachePolicy: "http-cache-disabled-by-e2e-routing;warm-spa-keeps-query-and-modules",
+      runtime: "docker-production-preview", cachePolicy: "http-cache-enabled;seeded-exchange-rates;warm-spa-keeps-query-and-modules",
       locale: "zh-CN", timezone: "Asia/Shanghai",
     },
   };
@@ -41,9 +42,26 @@ function report(): PerformanceReport {
 
 test("summaries keep cold and warm groups separate and use median and nearest-rank P75", () => {
   assert.deepEqual(summarize([10, 4, 1, 5, 3, 7, 6, 9, 8, 2]), { count: 10, median: 5.5, p75: 8 });
-  assert.equal(Object.keys(summarizeReport(report())).length, 28);
+  assert.equal(Object.keys(summarizeReport(report())).length, 38);
   assert.throws(() => summarize([1, 2]), /at least 10/);
   assert.throws(() => summarize(Array.from({ length: 10 }, () => Number.NaN)), /finite/);
+});
+
+test("native content-ready measurements reject retired clock and polling formats", () => {
+  for (const version of [1, 2, 3, 4, 5]) assert.equal(performanceReportSchema.safeParse({ ...report(), version }).success, false);
+  const missingWarmDocument = report();
+  missingWarmDocument.samples = missingWarmDocument.samples.filter((sample) => sample.cache !== "warm-document");
+  assert.throws(() => summarizeReport(missingWarmDocument), /warm-document/);
+});
+
+test("server diagnostics invalidate samples even when all browser assertions passed", () => {
+  const chunks = ["[WebServer] \u001b[31mER", "ROR scheduler failed\u001b[0m\n", "[WebServer] [console.warn] capture failed\n"];
+  const failures = performanceServerFailures(chunks.join(""));
+  assert.deepEqual(failures, ["[WebServer] ERROR scheduler failed", "[WebServer] [console.warn] capture failed"]);
+  assert.deepEqual(performanceServerFailures("[WebServer] INFO ready\n$ eslint --max-warnings 0\n"), []);
+  const candidate = report();
+  candidate.failures.push(...failures);
+  assert.throws(() => summarizeReport(candidate), /Failed runs/);
 });
 
 test("failures, skipped groups and duplicate iterations cannot become a baseline", () => {
@@ -69,7 +87,7 @@ test("comparison rejects different environments and requires remeasurement above
   candidate.artifactHash = "candidate-artifact";
   assert.deepEqual(comparePerformanceReports(baseline, candidate).regressions, []);
   for (const sample of candidate.samples) if (sample.metrics) sample.metrics.durationMs = 111;
-  assert.equal(comparePerformanceReports(baseline, candidate).regressions.length, 56);
+  assert.equal(comparePerformanceReports(baseline, candidate).regressions.length, 76);
   candidate.environment.fixtureHash = "different-data";
   assert.throws(() => comparePerformanceReports(baseline, candidate), /environments/);
 });
