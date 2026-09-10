@@ -363,7 +363,7 @@ function createOperations(options: DeployOptions): DeploymentOperations {
     const result = await runPnpm(["exec", "wrangler", "deployments", "status", "--json", "--config", options.configPath]);
     if (result.status !== 0) {
       const output = `${result.stderr}\n${result.stdout}`;
-      if (/has no deployments|script[_ -]?not[_ -]?found|worker.+not found/i.test(output)) return undefined;
+      if (/has no deployments|script[_ -]?not[_ -]?found|worker.+(?:not found|does not exist)/i.test(output)) return undefined;
       throw commandFailure("wrangler deployments status", result);
     }
     return parseActiveDeployment(parseJson(result.stdout, "Wrangler deployment status"));
