@@ -1,6 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "renewlet",
+  "account_id": "5697c41d4efbabcbac78eafe2cdf036b",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "renewlet.bhwa233.com", "custom_domain": true }],
   "main": "apps/worker/src/index.ts",
   "compatibility_date": "2026-06-24",
   "compatibility_flags": ["nodejs_compat"],
@@ -9,11 +13,11 @@
     "enabled": true,
     "logs": {
       "enabled": true,
-      "head_sampling_rate": 1
+      "head_sampling_rate": 0.1
     },
     "traces": {
       "enabled": true,
-      "head_sampling_rate": 1
+      "head_sampling_rate": 0.05
     }
   },
   "dev": {
@@ -40,7 +44,7 @@
       // DB 是结构化数据事实源；部署前必须先应用 apps/worker/migrations。
       "binding": "DB",
       "database_name": "renewlet",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "58046cef-41e5-436a-bc98-07807da9ffeb",
       "migrations_dir": "apps/worker/migrations"
     }
   ],
