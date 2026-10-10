@@ -1,14 +1,14 @@
 package main
 
-// notification_jobs.go 持久化通知任务、渠道重试状态和历史 DTO。
-//
-// 架构位置：notification_jobs 是调度幂等、失败重试和前端历史页面的共同事实来源。
-// result 字段写入强类型 payload，但输出时保留 RawMessage，让前端 union schema 精确区分空结果和 cron 结果。
+// notification_jobs 拥有调度幂等和渠道重试元数据；完整消息只存私有快照表，由历史查询组装公开 DTO。
 //
 // 注意： 唯一索引冲突被视为并发执行已抢占；修改这里的错误处理会直接影响重复发送保护。
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,32 +56,117 @@ func createNotificationJob(app core.App, userID string, schedule localScheduleDe
 	return record, true, nil
 }
 
-func markNotificationJobSending(app core.App, record *core.Record, attempts int) error {
-	record.Set("status", notificationStatusSending)
-	record.Set("attempts", attempts)
-	record.Set("lastError", "")
-	return app.Save(record)
+func markNotificationJobSending(app core.App, record *core.Record, attempts int) (*core.Record, error) {
+	var claimed *core.Record
+	// 事务内核对读取时的身份；事务外才允许外部发送，不能以全局锁替代数据库抢占。
+	err := app.RunInTransaction(func(txApp core.App) error {
+		current, err := txApp.FindRecordById("notification_jobs", record.Id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read notification claim: %w", err)
+		}
+		if !notificationJobClaimMatches(current, record) {
+			return nil
+		}
+		current.Set("status", notificationStatusSending)
+		current.Set("attempts", attempts)
+		current.Set("lastError", "")
+		if err := txApp.Save(current); err != nil {
+			return fmt.Errorf("save notification claim: %w", err)
+		}
+		claimed = current
+		return nil
+	})
+	return claimed, err
 }
 
-// finalizeNotificationJob 写入任务最终状态和严格 result。
-func finalizeNotificationJob(app core.App, record *core.Record, userID string, schedule localScheduleDecision, status string, lastError string, result notificationJobResult) error {
-	if record == nil {
-		existing, err := getNotificationJob(app, userID, schedule.ScheduledLocalDate, schedule.ScheduledLocalTime, schedule.TimeZone)
-		if err == nil {
-			record = existing
+func failExhaustedNotificationJob(app core.App, record *core.Record) (bool, error) {
+	settled := false
+	// 撤销耗尽次数的过期sending身份，保留渠道成功快照；迟到结果不得覆盖终止状态。
+	err := app.RunInTransaction(func(txApp core.App) error {
+		current, err := txApp.FindRecordById("notification_jobs", record.Id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
 		}
-	}
-	if record == nil {
-		created, _, err := createNotificationJob(app, userID, schedule, status, 1)
 		if err != nil {
-			return err
+			return fmt.Errorf("read exhausted notification: %w", err)
 		}
-		record = created
+		if !notificationJobClaimMatches(current, record) {
+			return nil
+		}
+		current.Set("status", notificationStatusFailed)
+		current.Set("lastError", "max_retries_reached")
+		if err := txApp.Save(current); err != nil {
+			return fmt.Errorf("settle exhausted notification: %w", err)
+		}
+		settled = true
+		return nil
+	})
+	return settled, err
+}
+
+func notificationJobClaimMatches(current, claimed *core.Record) bool {
+	// PocketBase落库精度为毫秒；刚Save的内存时间仍可能带纳秒，身份比较必须使用同一持久化表示。
+	return current.Id == claimed.Id && current.GetString("user") == claimed.GetString("user") &&
+		current.GetString("status") == claimed.GetString("status") && current.GetInt("attempts") == claimed.GetInt("attempts") &&
+		current.GetDateTime("updated").String() == claimed.GetDateTime("updated").String()
+}
+
+// finalizeNotificationJob 的 false 表示接管权已丢失；调用方不得推进该执行者的提醒状态。
+func finalizeNotificationJob(app core.App, record *core.Record, userID string, schedule localScheduleDecision, status string, lastError string, result notificationJobResult) (bool, error) {
+	if record != nil && record.GetString("user") != userID {
+		return false, errors.New("notification job owner mismatch")
 	}
-	record.Set("status", status)
-	record.Set("lastError", lastError)
-	record.Set("result", result)
-	return app.Save(record)
+	payload, err := json.Marshal(result.Message)
+	if err != nil {
+		return false, fmt.Errorf("encode notification message: %w", err)
+	}
+	parts := notificationMessageParts(payload)
+	metadata := notificationJobStoredResult{notificationJobMetadata: result.notificationJobMetadata, MessageChunkCount: len(parts)}
+	finalized := false
+	// 接管身份、渠道结果和完整消息快照由同一事务保护；旧执行者不能覆盖新发送者的结果。
+	err = app.RunInTransaction(func(txApp core.App) error {
+		var updated *core.Record
+		var err error
+		if record == nil {
+			var created bool
+			updated, created, err = createNotificationJob(txApp, userID, schedule, notificationStatusSending, 1)
+			if err == nil && !created {
+				return nil
+			}
+		} else {
+			updated, err = txApp.FindRecordById("notification_jobs", record.Id)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("read notification finalization claim: %w", err)
+		}
+		if updated == nil {
+			return errors.New("notification job was not created")
+		}
+		if updated.GetString("user") != userID {
+			return errors.New("notification job owner mismatch")
+		}
+		if record != nil && !notificationJobClaimMatches(updated, record) {
+			return nil
+		}
+		if err := writeNotificationJobMessage(txApp, updated.Id, parts); err != nil {
+			return fmt.Errorf("write notification message: %w", err)
+		}
+		updated.Set("status", status)
+		updated.Set("lastError", lastError)
+		updated.Set("result", metadata)
+		if err := txApp.Save(updated); err != nil {
+			return fmt.Errorf("save notification final state: %w", err)
+		}
+		finalized = true
+		return nil
+	})
+	return finalized, err
 }
 
 // createJobResult 构造历史面板可解析的 cron result。
@@ -92,18 +177,21 @@ func createJobResult(reason string, schedule localScheduleOccurrence, settings a
 		reasonValue = &reason
 	}
 	return normalizeNotificationJobResult(notificationJobResult{
-		Source:         "cron",
-		Reason:         reasonValue,
-		Force:          options.Force,
-		WindowMinutes:  options.WindowMinutes,
-		TriggeredAtUTC: options.Now.UTC().Format(time.RFC3339),
-		Schedule:       schedule,
-		Settings: notificationJobResultSettings{
-			Timezone:              settings.Timezone,
-			Locale:                string(locale),
-			NotificationTimeLocal: settings.NotificationTimeLocal,
-			EnabledChannels:       settings.EnabledChannels,
-			ShowExpired:           settings.ShowExpired,
+		notificationJobMetadata: notificationJobMetadata{
+			Source:         "cron",
+			Reason:         reasonValue,
+			Force:          options.Force,
+			WindowMinutes:  options.WindowMinutes,
+			TriggeredAtUTC: options.Now.UTC().Format(time.RFC3339),
+			Schedule:       schedule,
+			Settings: notificationJobResultSettings{
+				Timezone:              settings.Timezone,
+				Locale:                string(locale),
+				NotificationTimeLocal: settings.NotificationTimeLocal,
+				EnabledChannels:       settings.EnabledChannels,
+				ShowExpired:           settings.ShowExpired,
+			},
+			Channels: channels,
 		},
 		Message: notificationJobResultMessage{
 			Title:      due.Title,
@@ -112,13 +200,12 @@ func createJobResult(reason string, schedule localScheduleOccurrence, settings a
 			HasPayload: due.HasPayload,
 			Items:      due.Items,
 		},
-		Channels: channels,
 	})
 }
 
 // readJobChannels 从历史 result 中读取渠道状态，用于失败重试合并。
 func readJobChannels(record *core.Record) jobChannels {
-	var result notificationJobResult
+	var result notificationJobStoredResult
 	if err := decodeJSONRecordField(record, "result", &result); err != nil {
 		return normalizeJobChannels(jobChannels{})
 	}
@@ -165,9 +252,19 @@ func normalizeNotificationJobResult(result notificationJobResult) notificationJo
 // channelsToSend 返回本轮实际需要发送的渠道。
 // 对失败重试只发送仍启用且上次失败的渠道，防止成功渠道重复通知。
 func channelsToSend(existing *core.Record, previous jobChannels, enabled []string) []string {
+	succeeded := map[string]struct{}{}
+	for _, channel := range previous.Succeeded {
+		succeeded[channel] = struct{}{}
+	}
+	pending := []string{}
+	for _, channel := range enabled {
+		if _, sent := succeeded[channel]; !sent {
+			pending = append(pending, channel)
+		}
+	}
 	if existing != nil && existing.GetString("status") == notificationStatusFailed {
 		enabledSet := map[string]struct{}{}
-		for _, channel := range enabled {
+		for _, channel := range pending {
 			enabledSet[channel] = struct{}{}
 		}
 		out := []string{}
@@ -178,7 +275,7 @@ func channelsToSend(existing *core.Record, previous jobChannels, enabled []strin
 		}
 		return uniqueValidChannels(out)
 	}
-	return enabled
+	return pending
 }
 
 // mergeChannelResults 合并历史渠道结果和本轮发送结果。
@@ -274,78 +371,21 @@ func summarizeCronResult(options notificationCronOptions, results []notification
 	return out
 }
 
-func latestNotificationJob(app core.App, userID string, status string) (*core.Record, error) {
-	filter := "user = {:user}"
-	params := dbx.Params{"user": userID}
-	if status != "" {
-		filter += " && status = {:status}"
-		params["status"] = status
-	}
-	rows, err := app.FindRecordsByFilter("notification_jobs", filter, "-scheduledInstantUtc,-created", 1, 0, params)
-	if err != nil || len(rows) == 0 {
-		return nil, err
-	}
-	return rows[0], nil
-}
-
-func recordsToHistoryJobs(records []*core.Record) []notificationHistoryJob {
-	out := make([]notificationHistoryJob, 0, len(records))
-	for _, record := range records {
-		if job := toHistoryJob(record); job != nil {
-			out = append(out, *job)
-		}
-	}
-	return out
-}
-
-// toHistoryJob 将通知任务记录转换为 history DTO。
-// Result 保留原始 JSON，以便前端通过 union schema 区分 `{}` 和 cron result。
-func toHistoryJob(record *core.Record) *notificationHistoryJob {
-	if record == nil {
-		return nil
-	}
-	result := json.RawMessage([]byte("{}"))
-	if raw, err := notificationJobResultRaw(record); err == nil && len(raw) > 0 {
-		result = raw
-	}
-	return &notificationHistoryJob{
-		ID:                  record.Id,
-		ScheduledLocalDate:  record.GetString("scheduledLocalDate"),
-		ScheduledLocalTime:  record.GetString("scheduledLocalTime"),
-		TimeZone:            record.GetString("timeZone"),
-		ScheduledInstantUTC: record.GetString("scheduledInstantUtc"),
-		Status:              record.GetString("status"),
-		Attempts:            record.GetInt("attempts"),
-		LastError:           nullableString(record.GetString("lastError")),
-		Result:              result,
-		CreatedAt:           record.GetDateTime("created").Time().UTC().Format(time.RFC3339),
-		UpdatedAt:           record.GetDateTime("updated").Time().UTC().Format(time.RFC3339),
-	}
-}
-
-// notificationJobResultRaw 读取任务 result 的原始 JSON。
-// null/空值统一输出 `{}`，保持前端 empty result schema 稳定。
-func notificationJobResultRaw(record *core.Record) (json.RawMessage, error) {
-	data, err := jsonBytesFromValue(record.Get("result"))
-	if err != nil || len(bytes.TrimSpace(data)) == 0 {
-		return json.RawMessage([]byte("{}")), err
-	}
+// normalizeNotificationHistoryResult 只验收重建后的公开契约，不保留旧形状的运行时转换。
+func normalizeNotificationHistoryResult(data []byte) json.RawMessage {
 	trimmed := bytes.TrimSpace(data)
-	if bytes.Equal(trimmed, []byte("null")) {
-		return json.RawMessage([]byte("{}")), nil
-	}
 	if bytes.Equal(trimmed, []byte("{}")) {
-		return json.RawMessage([]byte("{}")), nil
+		return json.RawMessage("{}")
 	}
 	var result notificationJobResult
 	if err := decodeStrictJSONBytesInto(trimmed, &result, defaultAppLocale, false); err != nil {
-		return json.RawMessage([]byte("{}")), err
+		return json.RawMessage("{}")
 	}
 	// history 读路径只验收当前 cron result wire shape；旧/坏历史不再运行时重塑。
 	if !notificationJobResultIsCurrentContract(result) {
-		return json.RawMessage([]byte("{}")), nil
+		return json.RawMessage("{}")
 	}
-	return json.RawMessage(trimmed), nil
+	return json.RawMessage(trimmed)
 }
 
 func notificationJobResultIsCurrentContract(result notificationJobResult) bool {

@@ -12,7 +12,6 @@
  * - 首页统计由 `useDashboardStats` 生成，CRUD 弹窗状态由 `useSubscriptionCrud` 管理。
  */
 
-import { useCallback, useMemo } from "react";
 import Link from '@/components/router-link';
 import type { Subscription, SubscriptionCollectionItem } from "@/types/subscription";
 import { Header } from "@/components/header";
@@ -43,15 +42,18 @@ import { useSubscriptionCalendarDialog } from "@/hooks/use-subscription-calendar
 import { useZonedToday } from "@/hooks/use-zoned-today";
 import { formatCompactCurrencyAmount } from "@/lib/currency";
 import { cn } from "@/lib/utils";
+import { useRouteReady } from "@/components/route-progress";
 
 const EMPTY_SUBSCRIPTIONS: SubscriptionCollectionItem[] = [];
 
 /** 仪表盘页面组件。 */
 export default function Index() {
+  "use memo";
   const subscriptionsQuery = useSubscriptionAnalytics();
   const subscriptions = subscriptionsQuery.data ?? EMPTY_SUBSCRIPTIONS;
   const facetsQuery = useSubscriptionFacets();
   const settingsQuery = useSettings();
+  useRouteReady(subscriptionsQuery.isPending || settingsQuery.isPending);
   const settings = settingsQuery.data;
   const { config } = useCustomConfigState();
   const { t, locale, formatCurrency } = useI18n();
@@ -62,8 +64,8 @@ export default function Index() {
   const priceReferenceCurrency = settings ? resolveSubscriptionPriceReferenceCurrency(settings) : null;
   const timeZone = settings?.timezone ?? "UTC";
   const inheritedReminderDays = settings?.notificationReminderDays ?? DEFAULT_NOTIFICATION_REMINDER_DAYS;
-  const categoryByValue = useMemo(() => new Map(config.categories.map((category) => [category.value, category])), [config.categories]);
-  const paymentMethodByValue = useMemo(() => new Map(config.paymentMethods.map((method) => [method.value, method])), [config.paymentMethods]);
+  const categoryByValue = new Map(config.categories.map((category) => [category.value, category]));
+  const paymentMethodByValue = new Map(config.paymentMethods.map((method) => [method.value, method]));
   const availableTags = facetsQuery.data?.tags ?? [];
   // 页面级 today 是 Dashboard 全部日期派生的单一时钟，账号午夜到达时卡片、统计和提醒一起刷新。
   const today = useZonedToday(timeZone);
@@ -96,9 +98,9 @@ export default function Index() {
     handleEditDialogOpenChange,
     handlePrefetchSubscription,
   } = useSubscriptionCrud(subscriptions);
-  const handleEditFromDetail = useCallback((subscription: Subscription) => {
+  const handleEditFromDetail = (subscription: Subscription) => {
     handleEditSubscription(subscription.id);
-  }, [handleEditSubscription]);
+  };
 
   // 只有页面主数据还没有首屏结果时才展示骨架屏。
   // 汇率刷新期间保留已有内容，并在统计卡片副标题里提示加载状态，避免整页闪回 loading。

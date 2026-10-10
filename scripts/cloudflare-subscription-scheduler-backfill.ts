@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isValidDateOnly } from "../packages/shared/src/runtime";
+import { isValidDateOnly } from "@renewlet/shared/runtime";
 import { settingsFromRowJson } from "../apps/worker/src/db";
 import {
   addDays,
@@ -22,6 +22,7 @@ const schedulerVerificationRowSchema = z.object({
   stored_next_repeat_notification_due_at_utc: z.string().nullable(),
   fact_auto_renew_count: z.union([z.number(), z.string()]),
   fact_repeat_reminder_count: z.union([z.number(), z.string()]),
+  fact_subscription_count: z.union([z.number(), z.string()]),
   fact_next_repeat_notification_due_at_utc: z.string().nullable(),
 });
 
@@ -92,7 +93,7 @@ function storedDailyOccurrenceValid(value: string | null, timezone: string, loca
 }
 
 /**
- * 复验已有 v3 marker 的 scheduler：合法逾期值可能代表失败重试，不能按当前 now 强制改写成新的 due。
+ * 复验已有 v4 marker 的 scheduler：合法逾期值可能代表失败重试，不能按当前 now 强制改写成新的 due。
  * 聚合计数和 repeat 最小值仍必须与 subscriptions/repeat schedule 双向一致。
  */
 export async function assertStoredSubscriptionSchedulerRowsValid(
@@ -114,8 +115,9 @@ export async function assertStoredSubscriptionSchedulerRowsValid(
         scheduler.next_daily_notification_due_at_utc AS stored_next_daily_notification_due_at_utc,
         scheduler.next_repeat_notification_due_at_utc AS stored_next_repeat_notification_due_at_utc,
         (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id AND auto_renew = 1) AS fact_auto_renew_count,
-        (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id AND repeat_reminder_enabled = 1)
+        (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id AND repeat_reminder_enabled = 1 AND status != 'cancelled')
           AS fact_repeat_reminder_count,
+        (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id) AS fact_subscription_count,
         (SELECT next_due_at_utc FROM subscription_repeat_schedule
          WHERE user_id = users.id ORDER BY next_due_at_utc, subscription_id LIMIT 1)
           AS fact_next_repeat_notification_due_at_utc
@@ -131,6 +133,15 @@ export async function assertStoredSubscriptionSchedulerRowsValid(
       const settings = settingsFromRowJson(row.settings_json);
       const autoRenewCount = Number(row.fact_auto_renew_count);
       const repeatReminderCount = Number(row.fact_repeat_reminder_count);
+      const subscriptionCount = Number(row.fact_subscription_count);
+      const dailyOccurrenceValid = row.stored_next_daily_notification_due_at_utc === null
+        ? subscriptionCount === 0
+        : storedDailyOccurrenceValid(
+          row.stored_next_daily_notification_due_at_utc,
+          settings.timezone,
+          settings.notificationTimeLocal,
+          now,
+        );
       if (
         Number(row.stored_auto_renew_count) !== autoRenewCount
         || Number(row.stored_repeat_reminder_count) !== repeatReminderCount
@@ -142,12 +153,7 @@ export async function assertStoredSubscriptionSchedulerRowsValid(
           now,
           notificationWindowMinutes,
         )
-        || !storedDailyOccurrenceValid(
-          row.stored_next_daily_notification_due_at_utc,
-          settings.timezone,
-          settings.notificationTimeLocal,
-          now,
-        )
+        || !dailyOccurrenceValid
         || row.stored_next_repeat_notification_due_at_utc !== row.fact_next_repeat_notification_due_at_utc
       ) {
         throw new Error("subscription_scheduler_state stored occurrence invariant failed");
@@ -160,7 +166,7 @@ export async function assertStoredSubscriptionSchedulerRowsValid(
   }
 }
 
-/** 新建 v3 marker 前按本轮冻结的 now 精确核对刚重建的 scheduler，防止分页跨分钟产生漂移。 */
+/** 新建 v4 marker 前按本轮冻结的 now 精确核对刚重建的 scheduler，防止分页跨分钟产生漂移。 */
 export async function assertSubscriptionSchedulerRows(
   client: D1Client,
   now: Date,
@@ -180,8 +186,9 @@ export async function assertSubscriptionSchedulerRows(
         scheduler.next_daily_notification_due_at_utc AS stored_next_daily_notification_due_at_utc,
         scheduler.next_repeat_notification_due_at_utc AS stored_next_repeat_notification_due_at_utc,
         (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id AND auto_renew = 1) AS fact_auto_renew_count,
-        (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id AND repeat_reminder_enabled = 1)
+        (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id AND repeat_reminder_enabled = 1 AND status != 'cancelled')
           AS fact_repeat_reminder_count,
+        (SELECT COUNT(*) FROM subscriptions WHERE user_id = users.id) AS fact_subscription_count,
         (SELECT next_due_at_utc FROM subscription_repeat_schedule
          WHERE user_id = users.id ORDER BY next_due_at_utc, subscription_id LIMIT 1)
           AS fact_next_repeat_notification_due_at_utc

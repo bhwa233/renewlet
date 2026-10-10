@@ -60,6 +60,7 @@ type appSettings struct {
 	ThemeVariant                       string                    `json:"themeVariant"`
 	ThemeCustomColor                   themeCustomColor          `json:"themeCustomColor"`
 	ShowExpired                        bool                      `json:"showExpired"`
+	ShowLunarCalendar                  bool                      `json:"showLunarCalendar"`
 	LocalePreference                   string                    `json:"localePreference"`
 	DefaultCurrency                    string                    `json:"defaultCurrency"`
 	PublicStatusCurrency               string                    `json:"publicStatusCurrency"`
@@ -334,7 +335,7 @@ type notificationJobResultMessage struct {
 	Items      []notificationContentItem `json:"items"`
 }
 
-type notificationJobResult struct {
+type notificationJobMetadata struct {
 	Source         string                        `json:"source"`
 	Reason         *string                       `json:"reason"`
 	Force          bool                          `json:"force"`
@@ -342,8 +343,18 @@ type notificationJobResult struct {
 	TriggeredAtUTC string                        `json:"triggeredAtUtc"`
 	Schedule       localScheduleOccurrence       `json:"schedule"`
 	Settings       notificationJobResultSettings `json:"settings"`
-	Message        notificationJobResultMessage  `json:"message"`
 	Channels       jobChannels                   `json:"channels"`
+}
+
+// 重试只读取有界元数据；公开 DTO 在历史查询时连接完整消息，不复用持久化结构充当响应契约。
+type notificationJobResult struct {
+	notificationJobMetadata
+	Message notificationJobResultMessage `json:"message"`
+}
+
+type notificationJobStoredResult struct {
+	notificationJobMetadata
+	MessageChunkCount int `json:"messageChunkCount"`
 }
 
 // notificationHistoryJob 是前端历史面板消费的任务 DTO。
@@ -471,6 +482,7 @@ func defaultAppSettings() appSettings {
 		ThemeVariant:                       "emerald",
 		ThemeCustomColor:                   themeCustomColor{H: 160, S: 84, L: 39},
 		ShowExpired:                        true,
+		ShowLunarCalendar:                  false,
 		LocalePreference:                   string(autoLocalePreference),
 		DefaultCurrency:                    "CNY",
 		PublicStatusCurrency:               "inherit",

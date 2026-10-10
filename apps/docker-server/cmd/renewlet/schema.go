@@ -100,6 +100,9 @@ func ensureCollectionsSchema(app core.App) error {
 	if err := ensureNotificationJobsCollection(app, users); err != nil {
 		return err
 	}
+	if err := ensureNotificationMessageTable(app); err != nil {
+		return err
+	}
 	if err := ensureCalendarFeedsCollection(app, users); err != nil {
 		return err
 	}
@@ -597,6 +600,12 @@ func ensurePublicStatusPagesCollection(app core.App, users *core.Collection) err
 			return err
 		}
 		if err := upsertField(c, &core.BoolField{Name: "showPrices"}); err != nil {
+			return err
+		}
+		if err := upsertField(c, &core.BoolField{Name: "hideExpired"}); err != nil {
+			return err
+		}
+		if err := upsertField(c, &core.BoolField{Name: "hideLifetime"}); err != nil {
 			return err
 		}
 		if err := ensureAutodates(c); err != nil {
