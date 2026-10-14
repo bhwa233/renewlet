@@ -1,0 +1,133 @@
+name: Auto Sync Upstream
+
+on:
+  schedule:
+    # UTC 20:17 = Asia/Shanghai 04:17 the next day.
+    - cron: "17 20 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate the merged candidate (or current main) without pushing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renewlet-auto-sync-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'bhwa233/renewlet' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main without write credentials
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24.19.0
+
+      - name: Prepare upstream merge
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --ff-only origin/main
+          git fetch https://github.com/zhiyingzzhou/renewlet.git main
+          node scripts/fork-sync-upstream.mjs prepare "$(git rev-parse FETCH_HEAD)"
+
+      - name: Enable Corepack
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        run: corepack enable
+
+      - name: Install candidate dependencies
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify fork configuration and sync behavior
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        env:
+          BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
+        run: |
+          node scripts/fork-sync-upstream.mjs verify "$BASE_SHA"
+          node --test scripts/fork-sync-upstream.test.mjs
+          pnpm check:file-lines
+
+      - name: Set up Go for deployment checks
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: apps/docker-server/go.mod
+          cache: false
+
+      - name: Validate deployment scripts
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        run: pnpm check:deploy
+
+      - name: Check Cloudflare build path
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        run: pnpm check:cloudflare
+
+      - name: Build Cloudflare assets
+        if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
+        env:
+          RENEWLET_COMMIT: ${{ steps.prepare.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export RENEWLET_VERSION="$(node -p "require('./package.json').version")"
+          export RENEWLET_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          pnpm build:cloudflare
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Checkout publish destination with repository deploy key
+        if: steps.prepare.outputs.changed == 'true' && !inputs.dry_run
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          path: .sync-publish
+          ssh-key: ${{ secrets.UPSTREAM_SYNC_SSH_KEY }}
+
+      - name: Publish verified merge to main
+        if: steps.prepare.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ steps.prepare.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_sha="$(git -C .sync-publish ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$current_sha" != "$BASE_SHA" ]]; then
+            echo "::error::main changed during validation. Rerun to validate a fresh merge."
+            exit 1
+          fi
+          git -C .sync-publish fetch "$GITHUB_WORKSPACE" "$CANDIDATE_SHA"
+          git -C .sync-publish push origin "$CANDIDATE_SHA:refs/heads/main"
+          echo "Published $CANDIDATE_SHA to main. Cloudflare Git integration handles deployment." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report validation result
+        if: success() && (steps.prepare.outputs.changed == 'true' || inputs.dry_run)
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run passed; main was not modified and no deployment was triggered." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Report sync failure
+        if: failure()
+        run: echo "Sync or validation failed. Review the failed step; Cloudflare deployment status is tracked separately." >> "$GITHUB_STEP_SUMMARY"
