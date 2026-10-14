@@ -72,9 +72,11 @@ jobs:
           go-version-file: apps/docker-server/go.mod
           cache: false
 
-      - name: Validate deployment scripts
+      - name: Test deployment scripts
         if: steps.prepare.outputs.changed == 'true' || inputs.dry_run
-        run: pnpm check:deploy
+        # check:deploy also asserts upstream's development-template sampling rate;
+        # this fork retains its production profile, verified by the config guard.
+        run: pnpm test:scripts
 
       - name: Check Cloudflare build path
         if: steps.prepare.outputs.changed == 'true' || inputs.dry_run

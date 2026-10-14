@@ -42,7 +42,7 @@ It can also be started from GitHub Actions with **Run workflow** on `main`.
 
 The workflow merges upstream history, verifies that the custom domain, account,
 Worker name, D1/R2 bindings, queue names, observability settings, existing variables
-and this deployment document are preserved, then runs deployment script checks,
+and this deployment document are preserved, then runs deployment script tests,
 Cloudflare checks and the Cloudflare build. Only a verified candidate is pushed.
 Upstream workflow changes are merged as well; the fork's added workflow is retained.
 No upstream updates means no commit, push or deployment. Conflicts and failed checks
