@@ -68,6 +68,10 @@ export function SettingsScreen() {
     passwordResetEnabled,
     sensitiveAccountActionsDisabled,
     sensitiveAccountActionsDemoDisabled,
+    appStatusHasError,
+    appStatusHasData,
+    appStatusIsRefreshing,
+    retryAppStatus,
   } = controller;
   const {
     passwordDialogOpen,
@@ -134,6 +138,17 @@ export function SettingsScreen() {
                 <h1 className="text-2xl font-bold text-foreground">{t("settings.title")}</h1>
                 <p className="mt-1 text-sm text-muted-foreground">{t("settings.subtitle")}</p>
               </div>
+
+              {appStatusHasError ? (
+                <div className="flex flex-col gap-2 border border-destructive/30 bg-destructive/10 p-3 sm:flex-row sm:items-center sm:justify-between" role="alert">
+                  <span className="text-sm text-destructive">
+                    {appStatusHasData ? t("settings.managerRefreshFailed") : t("settings.managerLoadFailed")}
+                  </span>
+                  <Button type="button" variant="outline" size="sm" className="h-11 border-border" onClick={() => void retryAppStatus()} disabled={appStatusIsRefreshing} aria-busy={appStatusIsRefreshing ? true : undefined}>
+                    {t("settings.managerRetry")}
+                  </Button>
+                </div>
+              ) : null}
 
               <AccountSettingsSection
                 id="settings-account"

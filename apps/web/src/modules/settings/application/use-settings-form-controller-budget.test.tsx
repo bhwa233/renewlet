@@ -56,7 +56,7 @@ const mocks = vi.hoisted(() => ({
   deleteTelegramBotCommandsIsPending: false,
   isCloudflareRuntime: false,
   accountIdentity: { email: "alice@example.com" as string | null, role: "admin", banned: false },
-  appStatus: { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" }, isLoading: false },
+  appStatus: { status: "ready", data: { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" } }, error: null, isLoading: false, isRefreshing: false, isReady: true, retry: vi.fn() },
   authSecurityController: { canManage: true, disabled: false, isLoading: false, isSaving: false, isClearingSecret: false, isTesting: false, secretConfigured: false, hasChanges: false, draft: { enabled: false, siteKey: "", secret: "" }, testDialogOpen: false, testDialogSiteKey: "", testResetSignal: 0, testError: undefined, setEnabled: vi.fn(), setSiteKey: vi.fn(), setSecret: vi.fn(), discard: vi.fn(), save: vi.fn(), clearSecret: vi.fn(), startTest: vi.fn(), handleTestDialogOpenChange: vi.fn(), handleTestTokenChange: vi.fn() },
 }));
 
@@ -78,8 +78,8 @@ vi.mock("@/hooks/use-settings", () => ({
   useUpdateSettings: () => ({ mutateAsync: mocks.updateSettingsMutateAsync }),
 }));
 
-vi.mock("@/hooks/use-setup-status", () => ({
-  useSetupStatus: () => mocks.appStatus,
+vi.mock("@/hooks/use-app-status", () => ({
+  useAppStatus: () => mocks.appStatus,
 }));
 
 vi.mock("./use-auth-security-settings-controller", () => ({
@@ -256,7 +256,7 @@ describe("useSettingsFormController monthly budget input", () => {
     mocks.telegramBotCommands = { data: undefined, isLoading: false, refetch: vi.fn().mockResolvedValue(undefined) };
     mocks.isCloudflareRuntime = false;
     mocks.accountIdentity = { email: "alice@example.com", role: "admin", banned: false };
-    mocks.appStatus = { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" }, isLoading: false };
+    mocks.appStatus = { status: "ready", data: { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" } }, error: null, isLoading: false, isRefreshing: false, isReady: true, retry: vi.fn() };
     mocks.updateSettingsMutateAsync.mockImplementation(async (command: SettingsMutationCommand) => settingsMutationResult(command));
     mocks.saveConfig.mockImplementation(async (config: CustomConfig) => config);
     mocks.refreshRates.mockResolvedValue({ status: "succeeded", warning: null });

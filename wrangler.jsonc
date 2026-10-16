@@ -6,6 +6,8 @@
   "preview_urls": false,
   "routes": [{ "pattern": "renewlet.bhwa233.com", "custom_domain": true }],
   "main": "apps/worker/src/index.ts",
+  // Wrangler 4.150+ 默认上传 source map；显式固定只用于 Cloudflare 堆栈映射，不进入 Static Assets 或 Worker 运行时。
+  "upload_source_maps": true,
   // 兼容日期控制 Worker 的运行时行为；工具链升级不自动前移，调整须独立做行为回归。
   "compatibility_date": "2026-06-24",
   "compatibility_flags": ["nodejs_compat"],

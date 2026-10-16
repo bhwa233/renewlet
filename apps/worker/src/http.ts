@@ -38,15 +38,34 @@ export function ok(status = 200): Response {
 }
 
 /** errorResponse 是 Worker 错误 wire contract 的唯一出口；不要在 handler 里手写扁平 message/code。 */
-export function errorResponse(status: number, message: string, code?: string, details?: unknown): Response {
+export function errorResponse(
+  status: number,
+  message: string,
+  code?: string,
+  details?: unknown,
+  init: ResponseInit = {},
+): Response {
   // 这里 parse shared schema 是运行时自检，防止 Worker 和 Go/前端约定的错误 envelope 悄悄漂移。
+  const detailsRecord = details && typeof details === "object" && !Array.isArray(details)
+    ? details as Record<string, unknown>
+    : null;
+  const requestId = typeof detailsRecord?.["requestId"] === "string" && detailsRecord["requestId"].trim().length > 0
+    ? detailsRecord["requestId"]
+    : crypto.randomUUID();
+  const headers = new Headers(init.headers);
+  headers.set("cache-control", "no-store");
   return json(apiErrorResponseSchema.parse({
     error: {
       code: code ?? defaultErrorCodeForStatus(status),
       message,
       ...(details === undefined ? {} : { details }),
+      requestId,
     },
-  }), { status });
+  }), {
+    ...init,
+    status,
+    headers,
+  });
 }
 
 function defaultErrorCodeForStatus(status: number): string {

@@ -12,7 +12,7 @@ import NotFound from "./not-found";
 import SetupPage from "./setup";
 
 const mocks = vi.hoisted(() => ({
-  useSetupStatus: vi.fn(),
+  useAppStatus: vi.fn(),
   useSession: vi.fn(),
   useSystemVersion: vi.fn(),
   useSystemUpdate: vi.fn(),
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   useSystemRestart: vi.fn(),
 }));
 
-vi.mock("@/hooks/use-setup-status", () => ({ useSetupStatus: mocks.useSetupStatus }));
+vi.mock("@/hooks/use-app-status", () => ({ useAppStatus: mocks.useAppStatus }));
 vi.mock("@/lib/api-client", () => ({ apiFetch: vi.fn() }));
 vi.mock("@/lib/report-client-error", () => ({ reportClientError: vi.fn() }));
 vi.mock("@/lib/auth-client", () => ({ authClient: { useSession: mocks.useSession, signOut: vi.fn() } }));
@@ -63,12 +63,19 @@ beforeAll(async () => {
 beforeEach(() => {
   Object.defineProperty(globalThis.navigator, "languages", { configurable: true, value: ["ru-RU"] });
   Object.defineProperty(globalThis.navigator, "language", { configurable: true, value: "ru-RU" });
-  mocks.useSetupStatus.mockReturnValue({
-    setupRequired: true,
-    setupEnabled: true,
-    demoMode: false,
-    turnstile: { enabled: false, siteKey: "" },
+  mocks.useAppStatus.mockReturnValue({
+    status: "ready",
+    data: {
+      setupRequired: true,
+      setupEnabled: true,
+      demoMode: false,
+      turnstile: { enabled: false, siteKey: "" },
+    },
+    error: null,
     isLoading: false,
+    isRefreshing: false,
+    isReady: true,
+    retry: vi.fn(),
   });
   mocks.useSession.mockReturnValue({
     data: {

@@ -16,6 +16,7 @@ import {
 } from "@/lib/theme-storage";
 import { useSettingsFormController } from "./use-settings-form-controller";
 import type { SettingsNotificationHistoryController } from "./use-notification-history";
+import type { AppStatusState } from "@/hooks/use-app-status";
 
 export const BASE_SETTINGS: AppSettings = {
   ...DEFAULT_SETTINGS,
@@ -98,7 +99,7 @@ const mocks = vi.hoisted(() => ({
   openWindow: vi.fn(),
   isCloudflareRuntime: false,
   accountIdentity: { email: "alice@example.com" as string | null, role: "admin", banned: false },
-  appStatus: { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" }, isLoading: false },
+  appStatus: { status: "ready", data: { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" } }, error: null, isLoading: false, isRefreshing: false, isReady: true, retry: vi.fn() } as AppStatusState,
 }));
 
 function settingsMutationResult(command: SettingsMutationCommand) {
@@ -124,8 +125,8 @@ vi.mock("@/hooks/use-settings", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-setup-status", () => ({
-  useSetupStatus: () => mocks.appStatus,
+vi.mock("@/hooks/use-app-status", () => ({
+  useAppStatus: () => mocks.appStatus,
 }));
 
 vi.mock("@/hooks/use-auth-security", () => ({
@@ -422,7 +423,7 @@ export function setupSettingsFormControllerTestEnvironment() {
     mocks.customConfig = DEFAULT_CUSTOM_CONFIG;
     mocks.isCloudflareRuntime = false;
     mocks.accountIdentity = { email: "alice@example.com", role: "admin", banned: false };
-    mocks.appStatus = { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" }, isLoading: false };
+    mocks.appStatus = { status: "ready", data: { setupRequired: false, setupEnabled: true, demoMode: false, turnstile: { enabled: false, siteKey: "" } }, error: null, isLoading: false, isRefreshing: false, isReady: true, retry: vi.fn() };
     mocks.authSecuritySettings = { data: { turnstile: { enabled: false, siteKey: "", secretConfigured: false } }, isLoading: false };
     mocks.updateSettingsMutateAsync.mockImplementation(async (command: SettingsMutationCommand) => settingsMutationResult(command));
     mocks.updateAuthSecurityMutateAsync.mockImplementation(async (body: { turnstile: { enabled: boolean; siteKey: string; secret?: string } }) => ({

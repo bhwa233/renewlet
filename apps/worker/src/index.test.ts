@@ -41,6 +41,16 @@ function envFixture(overrides: Partial<Env> = {}): Env {
   };
 }
 
+function readyEnvFixture(overrides: Partial<Env> = {}): Env {
+  const prepare = vi.fn((sql: string) => ({
+    all: vi.fn().mockResolvedValue(sql.includes("sqlite_master")
+      ? { results: [{ name: "users" }, { name: "d1_migrations" }] }
+      : { results: [{ name: "id" }, { name: "role" }, { name: "banned" }] }),
+    first: vi.fn().mockResolvedValue({ name: "0046_exclusive_cloud_backup_staging" }),
+  }));
+  return envFixture({ DB: { prepare } as unknown as D1Database, ...overrides });
+}
+
 async function runScheduled(env: Env = envFixture()): Promise<void> {
   if (!worker.scheduled) throw new Error("Expected scheduled handler");
   await worker.scheduled({
@@ -90,10 +100,11 @@ describe("Cloudflare worker maintenance entrypoints", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("900");
     expect(response.headers.get("cache-control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "MAINTENANCE_MODE",
         message: "Renewlet is temporarily unavailable during a database upgrade.",
+        requestId: expect.any(String),
       },
     });
   });
@@ -106,6 +117,41 @@ describe("Cloudflare worker maintenance entrypoints", () => {
 
     expect(retryAll).toHaveBeenCalledWith({ delaySeconds: 900 });
     expect(phaseMocks.consumeBuiltInIconIndexRefreshQueue).not.toHaveBeenCalled();
+  });
+});
+
+describe("Cloudflare worker readiness", () => {
+  it("requires the users schema and applied migrations", async () => {
+    const response = await fetchWorker(
+      new Request("https://renewlet.example/api/app/ready"),
+      readyEnvFixture(),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("returns APP_NOT_READY when the required schema is incomplete", async () => {
+    const response = await fetchWorker(
+      new Request("https://renewlet.example/api/app/ready"),
+      readyEnvFixture({
+        DB: {
+          prepare: vi.fn((sql: string) => ({
+            all: vi.fn().mockResolvedValue(sql.includes("sqlite_master")
+              ? { results: [{ name: "users" }] }
+              : { results: [] }),
+            first: vi.fn().mockResolvedValue(null),
+          })),
+        } as unknown as D1Database,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "APP_NOT_READY",
+        requestId: expect.any(String),
+      },
+    });
   });
 });
 

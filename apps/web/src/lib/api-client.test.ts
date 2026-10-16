@@ -136,6 +136,34 @@ describe("api-client", () => {
     });
   });
 
+  it("parses Retry-After seconds from a structured API error", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(new Response(errorResponseBody("MAINTENANCE_MODE", "Temporarily unavailable"), {
+      status: 503,
+      headers: { "retry-after": "900" },
+    }));
+
+    await expect(apiFetch("/api/app/status", okResponseSchema)).rejects.toMatchObject({
+      status: 503,
+      code: "MAINTENANCE_MODE",
+      retryAfterSeconds: 900,
+    });
+  });
+
+  it("parses Retry-After HTTP dates as a non-negative delay", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-03T00:00:00.000Z"));
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(new Response(errorResponseBody("MAINTENANCE_MODE", "Temporarily unavailable"), {
+      status: 503,
+      headers: { "retry-after": "Wed, 03 Jun 2026 00:15:00 GMT" },
+    }));
+
+    await expect(apiFetch("/api/app/status", okResponseSchema)).rejects.toMatchObject({
+      retryAfterSeconds: 900,
+    });
+  });
+
   it("reads backend error envelope codes from non-2xx responses", async () => {
     const fetchMock = vi.mocked(fetch);
     const rawResponseText = errorResponseBody("UNAUTHORIZED", "请先登录后再操作");

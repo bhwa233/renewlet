@@ -101,7 +101,7 @@ import {
   telegramWebhook,
 } from "./telegram-bot";
 import { systemRestart, systemUpdate, systemUpdateStatus, systemVersion } from "./system";
-import { errorResponse, methodNotAllowed, requestLocale, requireSameOriginUnsafe, successJson, toResponse, type AppLocale } from "./http";
+import { errorResponse, HttpError, methodNotAllowed, requestLocale, requireSameOriginUnsafe, successJson, toResponse, type AppLocale } from "./http";
 import { serverText } from "./server-i18n";
 import type { Env } from "./types";
 
@@ -157,7 +157,7 @@ defineRoute(app, "/api/app/health", {
 });
 
 defineRoute(app, "/api/app/ready", {
-  GET: (context) => ready(context.env),
+  GET: (context) => ready(context.env, context.get("locale")),
 });
 
 defineRoute(app, "/api/app/status", {
@@ -416,15 +416,12 @@ function health(): Response {
 }
 
 function maintenanceResponse(): Response {
-  return Response.json(
-    { error: { code: "MAINTENANCE_MODE", message: "Renewlet is temporarily unavailable during a database upgrade." } },
-    {
-      status: 503,
-      headers: {
-        "cache-control": "no-store",
-        "retry-after": "900",
-      },
-    },
+  return errorResponse(
+    503,
+    "Renewlet is temporarily unavailable during a database upgrade.",
+    "MAINTENANCE_MODE",
+    undefined,
+    { headers: { "retry-after": "900" } },
   );
 }
 
@@ -432,10 +429,31 @@ function maintenanceModeEnabled(env: Env): boolean {
   return env.RENEWLET_MAINTENANCE_MODE === "true";
 }
 
-async function ready(env: Env): Promise<Response> {
-  // ready 只验证 D1 binding 可用；R2/第三方 provider 不应拖慢平台健康检查。
-  await env.DB.prepare("SELECT 1").first();
-  return health();
+async function ready(env: Env, locale: AppLocale): Promise<Response> {
+  // ready 只验证 Worker 依赖的最小 D1 schema；R2/第三方 provider 不应拖慢部署验收。
+  try {
+    const tables = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'd1_migrations')",
+    ).all<{ name: string }>();
+    const tableNames = new Set(tables.results.map((row) => row.name));
+    if (!tableNames.has("users") || !tableNames.has("d1_migrations")) {
+      throw new Error("required D1 tables are missing");
+    }
+
+    const columns = await env.DB.prepare("PRAGMA table_info(users)").all<{ name: string }>();
+    const columnNames = new Set(columns.results.map((row) => row.name));
+    for (const requiredColumn of ["id", "role", "banned"]) {
+      if (!columnNames.has(requiredColumn)) throw new Error(`users.${requiredColumn} is missing`);
+    }
+
+    const migration = await env.DB.prepare("SELECT name FROM d1_migrations LIMIT 1").first<{ name: string }>();
+    if (!migration?.name) throw new Error("D1 migrations are not applied");
+    return health();
+  } catch (error: unknown) {
+    const requestId = crypto.randomUUID();
+    console.error("app_not_ready", { requestId, error });
+    throw new HttpError(503, serverText(locale, "common.internalError"), "APP_NOT_READY", { requestId });
+  }
 }
 
 const worker: ExportedHandler<Env> = {

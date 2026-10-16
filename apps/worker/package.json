@@ -2,7 +2,7 @@
   "name": "@renewlet/cloudflare",
   "private": true,
   "license": "MIT",
-  "version": "0.3.30",
+  "version": "0.3.31",
   "type": "module",
   "scripts": {
     "build": "pnpm typecheck && wrangler deploy --dry-run --config ../../wrangler.jsonc --outdir dist",
@@ -33,6 +33,6 @@
     "@cloudflare/workers-types": "5.20261006.1",
     "typescript": "6.0.3",
     "vitest": "^4.1.11",
-    "wrangler": "4.149.0"
+    "wrangler": "4.151.1"
   }
 }

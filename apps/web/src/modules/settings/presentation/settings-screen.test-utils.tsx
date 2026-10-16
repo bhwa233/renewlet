@@ -429,6 +429,10 @@ export function createControllerState(overrides: {
   externalIntegrationsDisabled?: boolean;
   sensitiveAccountActionsDisabled?: boolean;
   sensitiveAccountActionsDemoDisabled?: boolean;
+  appStatusHasError?: boolean;
+  appStatusHasData?: boolean;
+  appStatusIsRefreshing?: boolean;
+  retryAppStatus?: () => Promise<unknown>;
   customConfig?: CustomConfig;
 } = {}) {
   const fn = vi.fn();
@@ -666,6 +670,10 @@ export function createControllerState(overrides: {
     externalIntegrationsDisabled: overrides.externalIntegrationsDisabled ?? false,
     sensitiveAccountActionsDisabled: overrides.sensitiveAccountActionsDisabled ?? false,
     sensitiveAccountActionsDemoDisabled: overrides.sensitiveAccountActionsDemoDisabled ?? false,
+    appStatusHasError: overrides.appStatusHasError ?? false,
+    appStatusHasData: overrides.appStatusHasData ?? true,
+    appStatusIsRefreshing: overrides.appStatusIsRefreshing ?? false,
+    retryAppStatus: overrides.retryAppStatus ?? vi.fn().mockResolvedValue(undefined),
   } satisfies SettingsFormController;
 }
 

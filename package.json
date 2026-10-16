@@ -2,7 +2,7 @@
   "name": "renewlet",
   "private": true,
   "license": "MIT",
-  "version": "0.3.30",
+  "version": "0.3.31",
   "packageManager": "pnpm@11.20.0",
   "engines": {
     "node": ">=24.19.0 <25 || >=26.5.0 <27"
@@ -104,7 +104,7 @@
     "tsx": "4.23.9",
     "typescript": "6.0.3",
     "web-vitals": "6.2.3",
-    "wrangler": "4.149.0",
+    "wrangler": "4.151.1",
     "zod": "4.4.3"
   }
 }

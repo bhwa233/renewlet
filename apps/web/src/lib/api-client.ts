@@ -40,6 +40,7 @@ export class ApiError extends Error {
   details: unknown;
   code: "timeout" | "aborted" | "network" | (string & {}) | undefined;
   rawResponseText: string;
+  retryAfterSeconds: number | undefined;
 
   constructor(
     message: string,
@@ -47,6 +48,7 @@ export class ApiError extends Error {
     details?: unknown,
     code?: "timeout" | "aborted" | "network" | (string & {}),
     rawResponseText = "",
+    retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -54,6 +56,7 @@ export class ApiError extends Error {
     this.details = details;
     this.code = code;
     this.rawResponseText = rawResponseText;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -281,6 +284,15 @@ function getErrorDetails(payload: unknown): unknown {
   return parseApiErrorPayload(payload)?.details;
 }
 
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  return Math.max(0, Math.ceil((date - Date.now()) / 1000));
+}
+
 function shouldClearAuthSession(status: number, payload: unknown, authMode: ApiAuthMode, sessionSnapshot: ProductSessionSnapshot | null): boolean {
   if (authMode !== "required" || !sessionSnapshot) return false;
   if (status !== 401) return false;
@@ -397,7 +409,14 @@ export async function apiFetch<Schema extends ApiSuccessResponseSchema>(
       if (shouldClearAuthSession(res.status, json, authMode, sessionSnapshot)) {
         clearAuthSession(sessionSnapshot);
       }
-      throw new ApiError(message, res.status, getErrorDetails(json), getErrorCode(json), payload.text);
+      throw new ApiError(
+        message,
+        res.status,
+        getErrorDetails(json),
+        getErrorCode(json),
+        payload.text,
+        parseRetryAfter(res.headers.get("retry-after")),
+      );
     }
 
     const parsed = responseSchema.safeParse(json);
@@ -431,7 +450,14 @@ export async function apiFetchBlob(input: RequestInfo, init?: ApiFetchInit): Pro
       if (shouldClearAuthSession(response.status, json, authMode, sessionSnapshot)) {
         clearAuthSession(sessionSnapshot);
       }
-      throw new ApiError(message, response.status, getErrorDetails(json), getErrorCode(json), payload.text);
+      throw new ApiError(
+        message,
+        response.status,
+        getErrorDetails(json),
+        getErrorCode(json),
+        payload.text,
+        parseRetryAfter(response.headers.get("retry-after")),
+      );
     }
     return await response.blob();
   } finally {
@@ -456,7 +482,14 @@ export async function apiFetchStream<T>(
       if (shouldClearAuthSession(response.status, json, authMode, sessionSnapshot)) {
         clearAuthSession(sessionSnapshot);
       }
-      throw new ApiError(message, response.status, getErrorDetails(json), getErrorCode(json), payload.text);
+      throw new ApiError(
+        message,
+        response.status,
+        getErrorDetails(json),
+        getErrorCode(json),
+        payload.text,
+        parseRetryAfter(response.headers.get("retry-after")),
+      );
     }
     idleWatchdog.reset();
     const responseForConsume = responseWithStreamActivity(response, idleWatchdog.reset, abort.signal);
