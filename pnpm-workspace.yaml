@@ -24,8 +24,10 @@ minimumReleaseAgeExclude:
   - ai@7.0.55
   - lucide-react@1.29.0
   - tsx@4.23.9
-  # 仅目标 Wrangler 和其官方 Miniflare 依赖未满 24 小时；workerd/类型仍走默认冷却期，不放行整个命名空间。
-  - wrangler@4.151.1
-  - miniflare@5.20261012.1-beta
+  # 本轮官方四件套在 24 小时冷却期内；只放行精确版本，避免绕过全仓供应链冷却或混入不匹配的运行时。
+  - wrangler@4.151.2
+  - miniflare@5.20261019.0-beta
+  - workerd@1.20261019.1
+  - '@cloudflare/workers-types@5.20261019.1'
   # 工程优化已审计并指定Vite版本；仅放行该版本的发布冷却期，不扩大后续升级范围。
   - vite@8.3.4

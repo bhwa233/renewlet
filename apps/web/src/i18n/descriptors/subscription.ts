@@ -670,7 +670,7 @@ export const messages = [
   msg({ id: "dashboard.spendingDistribution", message: "支出分布" }),
   msg({ id: "dashboard.emptyTitle", message: "从第一个订阅开始" }),
   msg({ id: "dashboard.emptyDescription", message: "添加订阅后，这里会汇总支出、续费和提醒。" }),
-  msg({ id: "upcoming.noneNextTwoWeeks", message: "暂无进入提醒窗口的续费或到期" }),
+  msg({ id: "upcoming.noneNextTwoWeeks", message: "暂无未来续费或到期" }),
   msg({ id: "upcoming.todayShort", message: "今" }),
   msg({ id: "upcoming.daysShort", message: "{days}天" }),
   msg({ id: "upcoming.renewsOn", message: "{date} 续费" }),

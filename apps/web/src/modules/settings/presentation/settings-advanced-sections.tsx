@@ -1,7 +1,7 @@
-import { Component, lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Component, lazy, Suspense, useMemo, useState } from "react";
 import type { ComponentType, LazyExoticComponent } from "react";
 import type { SettingsFormController } from "../application/use-settings-form-controller";
-import { getSettingsAdvancedGroup, type SettingsAdvancedGroup } from "./settings-advanced-groups";
+import { SETTINGS_ADVANCED_GROUPS, type SettingsAdvancedGroup } from "./settings-advanced-groups";
 import { SettingsAdvancedGroupPlaceholder } from "./settings-advanced-group-placeholder";
 import type { SettingsSectionId } from "./settings-section-navigation";
 
@@ -75,42 +75,22 @@ class SettingsAdvancedGroupErrorBoundary extends Component<
 
 export function SettingsAdvancedSections({
   controller,
-  activeSectionId,
   onReady,
 }: {
   controller: SettingsFormController;
-  activeSectionId?: SettingsSectionId | undefined;
-  onReady?: (() => void) | undefined;
+  onReady?: ((sectionIds: readonly SettingsSectionId[]) => void) | undefined;
 }) {
-  const initialGroup = activeSectionId ? getSettingsAdvancedGroup(activeSectionId) : null;
-  const [activatedGroups, setActivatedGroups] = useState<Set<SettingsAdvancedGroup>>(
-    // 月度预算属于全页保存状态；进入任一高级区块时一并提交它，保证 hash 直达通知等区块仍能编辑全局预算。
-    () => (initialGroup ? new Set([initialGroup, ...(initialGroup === "publicNotifications" ? ["budgetData" as const] : [])]) : new Set()),
-  );
   const [retryVersions, setRetryVersions] = useState<Record<SettingsAdvancedGroup, number>>({
     resourcesAi: 0,
     budgetData: 0,
     cloudCalendar: 0,
     publicNotifications: 0,
   });
-  const activeGroup = activeSectionId ? getSettingsAdvancedGroup(activeSectionId) : null;
-
-  useEffect(() => {
-    if (!activeGroup) return;
-    setActivatedGroups((current) => {
-      const nextGroups = new Set(current);
-      nextGroups.add(activeGroup);
-      if (activeGroup === "publicNotifications") nextGroups.add("budgetData");
-      return nextGroups.size === current.size ? current : nextGroups;
-    });
-  }, [activeGroup]);
 
   const groups = useMemo(() => Object.keys(groupLoaders) as SettingsAdvancedGroup[], []);
   return (
     <>
       {groups.map((group) => {
-        // 未激活分组只保留占位；真正挂载后才创建该组的远程数据 hook，已激活组保持挂载以保留草稿和查询缓存。
-        if (!activatedGroups.has(group)) return <SettingsAdvancedGroupPlaceholder key={group} group={group} />;
         const retry = () => {
           resetLazyGroup(group);
           setRetryVersions((current) => ({ ...current, [group]: current[group] + 1 }));
@@ -120,7 +100,8 @@ export function SettingsAdvancedSections({
             <SettingsAdvancedGroupErrorBoundary
               group={group}
               controller={controller}
-              onReady={onReady}
+              // 代码提交只代表本组 DOM 已进入布局；导航必须知道本次提交覆盖哪些 section，避免并行分组误结束目标校正。
+              onReady={() => onReady?.(SETTINGS_ADVANCED_GROUPS[group])}
               onRetry={retry}
               retryVersion={retryVersions[group]}
             />

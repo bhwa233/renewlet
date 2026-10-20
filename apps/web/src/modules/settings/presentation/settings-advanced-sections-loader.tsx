@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect, useState } from "react";
+import { Component, lazy, Suspense, useState } from "react";
 import type { ReactNode } from "react";
 import type { SettingsFormController } from "../application/use-settings-form-controller";
 import { getSettingsAdvancedGroup, SETTINGS_ADVANCED_GROUPS, type SettingsAdvancedGroup } from "./settings-advanced-groups";
@@ -7,8 +7,7 @@ import type { SettingsSectionId } from "./settings-section-navigation";
 
 type SettingsAdvancedSectionsProps = {
   controller: SettingsFormController;
-  activeSectionId: SettingsSectionId;
-  onReady: () => void;
+  onReady: (sectionIds: readonly SettingsSectionId[]) => void;
 };
 
 const loadSettingsAdvancedSections = () => import("./settings-advanced-sections").then((module) => ({ default: module.SettingsAdvancedSections }));
@@ -39,12 +38,6 @@ function SettingsAdvancedSectionsLoading() {
   return <>{groups.map((group) => <SettingsAdvancedGroupPlaceholder key={group} group={group} />)}</>;
 }
 
-function hashTargetsAdvancedSection(): boolean {
-  if (typeof window === "undefined") return false;
-  const id = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
-  return getSettingsAdvancedGroup(id as SettingsSectionId) !== null;
-}
-
 class SettingsAdvancedSectionsErrorBoundary extends Component<
   { children: ReactNode; onRetry: () => void },
   { error: Error | null }
@@ -66,18 +59,9 @@ class SettingsAdvancedSectionsErrorBoundary extends Component<
 
 export function DeferredSettingsAdvancedSections({
   controller,
-  activeSectionId,
   onReady,
 }: SettingsAdvancedSectionsProps) {
-  const [activated, setActivated] = useState(hashTargetsAdvancedSection);
   const [retryVersion, setRetryVersion] = useState(0);
-
-  useEffect(() => {
-    // 显示区块是高级设置前的预取哨兵；目录 intent 会更早下载分组，组内数据 hook 只在分组挂载后启动。
-    if (activeSectionId === "settings-display" || getSettingsAdvancedGroup(activeSectionId)) setActivated(true);
-  }, [activeSectionId]);
-
-  if (!activated) return <SettingsAdvancedSectionsLoading />;
 
   const retry = () => {
     resetLazySettingsAdvancedSections();
@@ -86,7 +70,7 @@ export function DeferredSettingsAdvancedSections({
   return (
     <SettingsAdvancedSectionsErrorBoundary key={retryVersion} onRetry={retry}>
       <Suspense fallback={<SettingsAdvancedSectionsLoading />}>
-        <LazySettingsAdvancedSections controller={controller} activeSectionId={activeSectionId} onReady={onReady} />
+        <LazySettingsAdvancedSections controller={controller} onReady={onReady} />
       </Suspense>
     </SettingsAdvancedSectionsErrorBoundary>
   );

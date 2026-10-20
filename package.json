@@ -2,7 +2,7 @@
   "name": "renewlet",
   "private": true,
   "license": "MIT",
-  "version": "0.3.31",
+  "version": "0.3.33",
   "packageManager": "pnpm@11.20.0",
   "engines": {
     "node": ">=24.19.0 <25 || >=26.5.0 <27"
@@ -94,7 +94,7 @@
   },
   "devDependencies": {
     "@aws-sdk/xml-builder": "3.972.37",
-    "@cloudflare/workers-types": "5.20261006.1",
+    "@cloudflare/workers-types": "5.20261019.1",
     "@lingui/format-po": "6.6.0",
     "@playwright/test": "^1.62.1",
     "@redocly/cli": "2.45.0",
@@ -104,7 +104,7 @@
     "tsx": "4.23.9",
     "typescript": "6.0.3",
     "web-vitals": "6.2.3",
-    "wrangler": "4.151.1",
+    "wrangler": "4.151.2",
     "zod": "4.4.3"
   }
 }

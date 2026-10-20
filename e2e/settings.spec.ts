@@ -8,6 +8,7 @@ import {
 } from "./support/layout";
 import {
   deferAdvancedSettingsModule,
+  expectAllAdvancedSettingsSectionsReady,
   expectSettingsSectionAtScrollAnchor,
   fillChangedTestPhone,
   getSettingsDiscardButton,
@@ -26,6 +27,20 @@ test("desktop passkey fields and add action share stable form tracks", async ({ 
   await expect(row).toHaveAttribute("data-align-at", "md");
   await expect(row).toHaveAttribute("data-tracks", "3");
   await expectFormFieldRowAlignment(row, "desktop passkey registration", { action: true });
+});
+
+test("settings advanced sections mount after the initial commit without scrolling", async ({ page }) => {
+  const advancedModule = await deferAdvancedSettingsModule(page);
+  await gotoSettingsAfterHydration(page);
+  await advancedModule.waitForRequest();
+
+  await expect(page.locator("#settings-notifications")).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("#root")).toHaveJSProperty("scrollTop", 0);
+
+  advancedModule.release();
+
+  await expectAllAdvancedSettingsSectionsReady(page);
+  await expect(page.locator("#root")).toHaveJSProperty("scrollTop", 0);
 });
 
 test("settings directory locates the skeleton before deferred content commits", async ({ page }) => {

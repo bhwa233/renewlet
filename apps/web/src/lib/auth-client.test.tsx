@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readProductSession, writeProductSession } from "@/services/product-session";
+import { appQueryClient } from "@/lib/app-query-client";
 import type { SessionData } from "./auth-client";
 import { authClient, initializeProductSessionQuery } from "./auth-client";
 
@@ -234,6 +235,19 @@ describe("authClient.useSession", () => {
 
     expect(mocks.cancelActivePasskeyCeremony).toHaveBeenCalledTimes(1);
     expect(readProductSession()).toBeNull();
+  });
+
+  it("cancels in-flight queries before revoking the session on sign out", async () => {
+    const cancelQueries = vi.spyOn(appQueryClient, "cancelQueries").mockResolvedValue();
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ ok: true, data: null }), { status: 200 }));
+    writeProductSession(sessionFixture);
+
+    await authClient.signOut();
+
+    expect(cancelQueries).toHaveBeenCalledTimes(1);
+    expect(mocks.fetch).toHaveBeenCalledWith("/api/app/auth/logout", expect.objectContaining({ method: "POST" }));
+    expect(readProductSession()).toBeNull();
+    cancelQueries.mockRestore();
   });
 
   it("allows stale MFA verification sessions to be ignored before persistence", async () => {

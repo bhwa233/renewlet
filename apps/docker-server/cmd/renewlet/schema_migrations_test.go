@@ -111,6 +111,10 @@ func TestEnsureSchemaUpgradesHistoricalPaymentTypesAndRebuildsDerivedState(t *te
 		"oneTimeTermCount": 6, "oneTimeTermUnit": "month", "autoRenew": false, "autoCalculateNextBillingDate": false,
 		"startDate": "2026-02-15", "nextBillingDate": "2026-08-15",
 	})
+	trial := createSchemaTestSubscriptionNoValidate(t, app, user.Id, map[string]interface{}{
+		"name": "Historical Trial", "price": "24", "status": "trial", "autoRenew": true,
+		"startDate": "2026-07-01", "nextBillingDate": "2026-12-01", "trialEndDate": "2026-08-20",
+	})
 
 	type factSnapshot struct {
 		ID               string `db:"id"`
@@ -188,7 +192,7 @@ func TestEnsureSchemaUpgradesHistoricalPaymentTypesAndRebuildsDerivedState(t *te
 			}
 		}
 	}
-	assertFiltered(subscriptionListQuery{PaymentType: "auto"}, auto.Id)
+	assertFiltered(subscriptionListQuery{PaymentType: "auto"}, auto.Id, trial.Id)
 	assertFiltered(subscriptionListQuery{PaymentType: "manual"}, manual.Id)
 	assertFiltered(subscriptionListQuery{PaymentType: "one-time-buyout"}, buyout.Id)
 	assertFiltered(subscriptionListQuery{PaymentType: "one-time-fixed-term"}, fixed.Id)
@@ -196,7 +200,7 @@ func TestEnsureSchemaUpgradesHistoricalPaymentTypesAndRebuildsDerivedState(t *te
 		BillingCycles: []string{"one-time"}, PaymentType: "one-time-fixed-term",
 		NextBillingFrom: "2026-08-01", NextBillingTo: "2026-08-31",
 	}, fixed.Id)
-	assertFiltered(subscriptionListQuery{NextBillingFrom: "2026-08-01", NextBillingTo: "2026-08-31"}, auto.Id, manual.Id, fixed.Id)
+	assertFiltered(subscriptionListQuery{NextBillingFrom: "2026-08-01", NextBillingTo: "2026-08-31"}, auto.Id, manual.Id, fixed.Id, trial.Id)
 
 	type projectionSnapshot struct {
 		SubscriptionID   string `db:"subscription_id"`
@@ -216,8 +220,8 @@ func TestEnsureSchemaUpgradesHistoricalPaymentTypesAndRebuildsDerivedState(t *te
 		return rows
 	}
 	firstProjection := readProjection()
-	if len(firstProjection) != 4 {
-		t.Fatalf("rebuilt projection rows=%#v, want four facts and no stale row", firstProjection)
+	if len(firstProjection) != 5 {
+		t.Fatalf("rebuilt projection rows=%#v, want five facts and no stale row", firstProjection)
 	}
 	if applied, err := schemaDataMigrationApplied(app, "subscription_cycle_fields_v1"); err != nil || !applied {
 		t.Fatalf("cycle migration marker applied=%v err=%v, want true nil", applied, err)

@@ -289,15 +289,19 @@ func subscriptionProjectionBaseQuery(userID string, query subscriptionListQuery)
 	appendSQLPaymentTypeCondition(&base, query.PaymentType)
 	appendSQLTagCondition(&base, query.Tags)
 	if query.NextBillingFrom != "" || query.NextBillingTo != "" {
-		// PocketBase 投影用 0 表示长期买断服务期；日期范围只筛真实续费/到期事件，不能把购买日占位值算进去。
+		// PocketBase 投影用 0 表示长期买断服务期；日期范围覆盖续费日和试用结束日，不能把购买日占位值算进去。
 		base.conditions = append(base.conditions, "NOT (idx.billing_cycle = 'one-time' AND COALESCE(idx.one_time_term_count, 0) <= 0)")
 	}
-	if query.NextBillingFrom != "" {
-		base.conditions = append(base.conditions, "idx.next_billing_date >= {:nextBillingFrom}")
+	if query.NextBillingFrom != "" && query.NextBillingTo != "" {
+		// 日历按客户可见的下一事件取数；试用结束日可能早于 next_billing_date，不能只筛后者。
+		base.conditions = append(base.conditions, "((idx.next_billing_date >= {:nextBillingFrom} AND idx.next_billing_date <= {:nextBillingTo}) OR (idx.status = 'trial' AND idx.trial_end_date >= {:nextBillingFrom} AND idx.trial_end_date <= {:nextBillingTo}))")
 		base.params["nextBillingFrom"] = query.NextBillingFrom
-	}
-	if query.NextBillingTo != "" {
-		base.conditions = append(base.conditions, "idx.next_billing_date <= {:nextBillingTo}")
+		base.params["nextBillingTo"] = query.NextBillingTo
+	} else if query.NextBillingFrom != "" {
+		base.conditions = append(base.conditions, "(idx.next_billing_date >= {:nextBillingFrom} OR (idx.status = 'trial' AND idx.trial_end_date >= {:nextBillingFrom}))")
+		base.params["nextBillingFrom"] = query.NextBillingFrom
+	} else if query.NextBillingTo != "" {
+		base.conditions = append(base.conditions, "(idx.next_billing_date <= {:nextBillingTo} OR (idx.status = 'trial' AND idx.trial_end_date <= {:nextBillingTo}))")
 		base.params["nextBillingTo"] = query.NextBillingTo
 	}
 	if query.Pinned != nil {

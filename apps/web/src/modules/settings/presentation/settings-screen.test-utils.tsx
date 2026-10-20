@@ -21,6 +21,7 @@ import { DEFAULT_SETTINGS, type AppSettings, type NotificationChannel } from "@/
 import type { ThemeMode } from "@/types/theme";
 import { BUILT_IN_ICON_PROVIDERS, type BuiltInIconProvider } from "@renewlet/shared/built-in-icons";
 import { SettingsScreen } from "./settings-screen";
+import type { SettingsSectionId } from "./settings-section-navigation";
 import { NotificationChannelConfigPanel } from "./notification-channel-config-panel";
 import type { UploadedAssetsManagerController } from "../application/use-uploaded-assets-manager";
 import type { SettingsAuthSecurityController } from "../application/use-auth-security-settings-controller";
@@ -233,12 +234,27 @@ vi.mock("./settings-advanced-sections-loader", async () => {
   const CloudCalendarGroup = cloudCalendar.SettingsAdvancedCloudCalendarGroup;
   const PublicNotificationsGroup = publicNotifications.SettingsAdvancedPublicNotificationsGroup;
   return {
-    DeferredSettingsAdvancedSections: ({ controller, onReady }: { controller: Parameters<typeof ResourcesAiGroup>[0]["controller"]; onReady: () => void }) => (
+    DeferredSettingsAdvancedSections: ({ controller, onReady }: {
+      controller: Parameters<typeof ResourcesAiGroup>[0]["controller"];
+      onReady: (sectionIds: readonly SettingsSectionId[]) => void;
+    }) => (
       <>
-        <ResourcesAiGroup controller={controller} onReady={onReady} />
-        <BudgetDataGroup controller={controller} onReady={onReady} />
-        <CloudCalendarGroup controller={controller} onReady={onReady} />
-        <PublicNotificationsGroup controller={controller} onReady={onReady} />
+        <ResourcesAiGroup
+          controller={controller}
+          onReady={() => onReady(["settings-icon-sources", "settings-uploaded-icons", "settings-ai-recognition"])}
+        />
+        <BudgetDataGroup
+          controller={controller}
+          onReady={() => onReady(["settings-budget", "settings-data-config", "settings-exchange"])}
+        />
+        <CloudCalendarGroup
+          controller={controller}
+          onReady={() => onReady(["settings-cloud-backup", "settings-calendar-feed"])}
+        />
+        <PublicNotificationsGroup
+          controller={controller}
+          onReady={() => onReady(["settings-public-status", "settings-public-api", "settings-timezone", "settings-notifications"])}
+        />
       </>
     ),
     preloadSettingsAdvancedSections: vi.fn(),

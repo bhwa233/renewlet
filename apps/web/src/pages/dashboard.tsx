@@ -262,7 +262,6 @@ export default function Index() {
               <UpcomingRenewals
                 subscriptions={subscriptions}
                 today={today}
-                notificationReminderDays={inheritedReminderDays}
               />
             </div>
           </div>

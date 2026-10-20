@@ -2031,7 +2031,7 @@ msgstr "Нет данных о подписках"
 #. js-lingui-explicit-id
 #: src/i18n/descriptors/subscription.ts:673
 msgid "upcoming.noneNextTwoWeeks"
-msgstr "В выбранном периоде нет продлений и окончаний подписок"
+msgstr "Нет предстоящих продлений и окончаний подписок"
 
 #. js-lingui-explicit-id
 #: src/i18n/descriptors/subscription.ts:191

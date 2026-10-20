@@ -109,6 +109,19 @@ describe("Cloudflare subscription collection routes", () => {
     }, dateOnlyInZone(new Date(), "UTC"), subscriptionCollectionContractFixture.collectionLimit);
   });
 
+  it("keeps the calendar query shape while forwarding its date range to the collection planner", async () => {
+    const env = envFixture();
+    await readSubscriptionCalendar(request("/api/app/subscriptions/calendar?from=2026-01-01&to=2026-01-31"), env);
+
+    expect(mocks.listBoundedSubscriptionsForQuery).toHaveBeenCalledWith(
+      env,
+      USER_ID,
+      { nextBillingFrom: "2026-01-01", nextBillingTo: "2026-01-31" },
+      "2026-09-14",
+      subscriptionCollectionContractFixture.collectionLimit,
+    );
+  });
+
   it("accepts total 5000 and rejects 5001 for every complete collection route", async () => {
     const env = envFixture();
     mocks.listBoundedSubscriptionsForQuery.mockResolvedValueOnce({

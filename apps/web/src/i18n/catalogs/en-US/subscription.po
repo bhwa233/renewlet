@@ -2031,7 +2031,7 @@ msgstr "No subscription data"
 #. js-lingui-explicit-id
 #: src/i18n/descriptors/subscription.ts:673
 msgid "upcoming.noneNextTwoWeeks"
-msgstr "No renewals or expiries in the reminder window"
+msgstr "No upcoming renewals or expiries"
 
 #. js-lingui-explicit-id
 #: src/i18n/descriptors/subscription.ts:191

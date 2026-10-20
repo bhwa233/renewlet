@@ -2031,7 +2031,7 @@ msgstr "暂无订阅数据"
 #. js-lingui-explicit-id
 #: src/i18n/descriptors/subscription.ts:673
 msgid "upcoming.noneNextTwoWeeks"
-msgstr "暂无进入提醒窗口的续费或到期"
+msgstr "暂无未来续费或到期"
 
 #. js-lingui-explicit-id
 #: src/i18n/descriptors/subscription.ts:191

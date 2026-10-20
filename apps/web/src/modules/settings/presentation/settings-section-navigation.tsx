@@ -355,10 +355,12 @@ export function useSettingsSectionNavigation(
     navigation.initialFrame = window.requestAnimationFrame(commitTargetWhenRendered);
   }, [deferredSectionIds, endProgrammaticNavigation, navigate, scheduleLayoutCorrection]);
 
-  const markDeferredSectionsReady = useCallback(() => {
+  const markDeferredSectionsReady = useCallback((sectionIds: readonly SettingsSectionId[]) => {
     const navigation = programmaticNavigationRef.current;
     if (!navigation) return;
     if (deferredSectionIds && !deferredSectionIds.includes(navigation.targetId)) return;
+    // 四组 chunk 并行提交；只有覆盖当前目标的分组才能结束等待，避免无关分组先提交造成锚点校正竞态。
+    if (!sectionIds.includes(navigation.targetId)) return;
     navigation.phase = "moduleCommitted";
     navigation.awaitingDeferredCommit = false;
     navigation.needsCorrection = true;
