@@ -26,6 +26,8 @@ env:
   R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
   CLOUDFLARE_OBSERVABILITY_PROFILE: development
   RENEWLET_COMMIT: ${{ github.sha }}
+  # fork 自管部署要求每次 push 都必须真正落到 Cloudflare；开启后缺 secrets 直接失败，避免绿色空转。
+  REQUIRE_CLOUDFLARE_DEPLOY: ${{ vars.REQUIRE_CLOUDFLARE_DEPLOY }}
 
 jobs:
   deploy:
@@ -83,6 +85,10 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             printf -v missing_list '%s, ' "${missing[@]}"
             missing_list="${missing_list%, }"
+            if [[ "${REQUIRE_CLOUDFLARE_DEPLOY:-}" == "true" ]]; then
+              echo "::error title=Cloudflare deploy blocked::Missing GitHub Actions secrets: ${missing_list}. This repository requires remote deploy (REQUIRE_CLOUDFLARE_DEPLOY=true): builds passed but nothing was published."
+              exit 1
+            fi
             echo "::notice title=Cloudflare deploy skipped::Missing GitHub Actions secrets: ${missing_list}. Build checks passed; add all required secrets to enable remote D1 migration and Worker deploy."
             exit 0
           fi
@@ -96,3 +102,23 @@ jobs:
       - name: Deploy Renewlet through the exclusive migration orchestrator
         if: steps.deployment-secrets.outputs.ready == 'true'
         run: pnpm deploy -- --config "$CI_WRANGLER_CONFIG" --maintenance-config "$CI_WRANGLER_MAINTENANCE_CONFIG"
+
+      - name: Summarize deployment outcome
+        if: always()
+        shell: bash
+        env:
+          READY: ${{ steps.deployment-secrets.outputs.ready }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "### Cloudflare Worker 部署结论"
+            echo
+            if [[ "${JOB_STATUS}" != "success" ]]; then
+              echo "- 结果：**失败或取消** — 线上未被本次运行改动，请查看上方失败步骤。"
+            elif [[ "${READY}" == "true" ]]; then
+              echo "- 结果：**已执行 D1 迁移并部署** \`${RENEWLET_VERSION:-unknown}\`（\`${GITHUB_SHA:0:7}\`）"
+            else
+              echo "- 结果：**未部署** — 缺少 Cloudflare secrets，本次只做了构建校验。"
+            fi
+            echo "- 触发：\`${GITHUB_EVENT_NAME}\` · 分支 \`${GITHUB_REF_NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

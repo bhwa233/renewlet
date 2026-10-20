@@ -119,17 +119,29 @@ jobs:
           fi
           git -C .sync-publish fetch "$GITHUB_WORKSPACE" "$CANDIDATE_SHA"
           git -C .sync-publish push origin "$CANDIDATE_SHA:refs/heads/main"
-          echo "Published $CANDIDATE_SHA to main. Cloudflare Git integration handles deployment." >> "$GITHUB_STEP_SUMMARY"
+          echo "Published $CANDIDATE_SHA to main. The Cloudflare Worker workflow now owns D1 migration and deploy." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Report validation result
-        if: success() && (steps.prepare.outputs.changed == 'true' || inputs.dry_run)
+      - name: Summarize sync outcome
+        if: always()
+        shell: bash
         env:
+          JOB_STATUS: ${{ job.status }}
+          CHANGED: ${{ steps.prepare.outputs.changed }}
+          BASE_SHA: ${{ steps.prepare.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ steps.prepare.outputs.candidate_sha }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "Dry run passed; main was not modified and no deployment was triggered." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Report sync failure
-        if: failure()
-        run: echo "Sync or validation failed. Review the failed step; Cloudflare deployment status is tracked separately." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### 上游同步结论"
+            echo
+            if [[ "${JOB_STATUS}" != "success" ]]; then
+              echo "- 结果：**失败** — main 未被修改，线上未部署。多数是上游改动与 fork 配置（wrangler.jsonc / 部署文档）冲突，需人工合并。"
+            elif [[ "${CHANGED}" != "true" ]]; then
+              echo "- 结果：**已是最新** — 上游没有新提交，未产生同步记录。"
+            elif [[ "${DRY_RUN}" == "true" ]]; then
+              echo "- 结果：**干跑通过** — 候选 \`${CANDIDATE_SHA:0:7}\` 校验通过，未推送、未部署。"
+            else
+              echo "- 结果：**已合并并推送** \`${CANDIDATE_SHA:0:7}\` — push 会继续触发 Cloudflare Worker 迁移与部署。"
+            fi
+            echo "- 基线：\`${BASE_SHA:0:7}\` · 触发：\`${GITHUB_EVENT_NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
