@@ -268,13 +268,17 @@ func staticWithSecurityHeaders(staticFS fs.FS, customHeadHTML customHeadHTMLConf
 
 func staticCacheControl(request *http.Request, staticFS fs.FS) string {
 	name := strings.TrimPrefix(path.Clean("/"+request.URL.Path), "/")
-	if strings.HasPrefix(name, "assets/") {
-		if _, err := fs.Stat(staticFS, name); err == nil {
+	if _, err := fs.Stat(staticFS, name); err == nil {
+		if strings.HasPrefix(name, "assets/") {
 			// Vite assets 带内容 hash；Docker 与 Cloudflare 必须同样长缓存，避免切页 chunk 每次重验证。
 			return "public, max-age=31536000, immutable"
 		}
+		if name != "index.html" {
+			return "no-cache"
+		}
 	}
-	return "no-cache"
+	// fnOS 客户端升级后曾因旧静态缓存白屏，清除应用缓存即恢复；HTML 入口和 SPA 回退不能留存旧 chunk 引用。
+	return "no-store"
 }
 
 func staticContentSecurityPolicy(request *http.Request, customHeadHTML customHeadHTMLConfig) string {

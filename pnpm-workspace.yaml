@@ -10,7 +10,7 @@ allowBuilds:
 # 安全约束只覆盖漏洞版本范围，其余传递依赖通过 pnpm update 正常更新锁文件。
 overrides:
   "browserslist@<=4.28.6": "^4.28.7"
-# pnpm 11 默认拦截发布不足 24 小时的包；本轮明确升级到 same-day latest 时只放行精确版本，避免用 minimumReleaseAge: 0 关闭整个供应链冷却期。
+# pnpm 11 默认拦截发布不足 24 小时的包；只对已审计的精确版本放行，不关闭全仓冷却期。
 minimumReleaseAgeExclude:
   - '@ai-sdk/anthropic@4.0.33'
   - '@ai-sdk/gateway@4.0.43'
@@ -24,10 +24,5 @@ minimumReleaseAgeExclude:
   - ai@7.0.55
   - lucide-react@1.29.0
   - tsx@4.23.9
-  # 本轮官方四件套在 24 小时冷却期内；只放行精确版本，避免绕过全仓供应链冷却或混入不匹配的运行时。
-  - wrangler@4.151.2
-  - miniflare@5.20261019.0-beta
-  - workerd@1.20261019.1
-  - '@cloudflare/workers-types@5.20261019.1'
   # 工程优化已审计并指定Vite版本；仅放行该版本的发布冷却期，不扩大后续升级范围。
   - vite@8.3.4
